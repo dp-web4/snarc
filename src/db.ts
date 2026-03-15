@@ -4,12 +4,33 @@
  */
 
 import Database from 'better-sqlite3';
+import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
-const ENGRAM_DIR = join(homedir(), '.engram');
-const DB_PATH = join(ENGRAM_DIR, 'engram.db');
+const ENGRAM_ROOT = join(homedir(), '.engram');
+
+/**
+ * Derive a per-directory database path from the launch directory.
+ * Same pattern as Claude Code's -c flag: each project directory gets
+ * its own isolated context. Structure: ~/.engram/projects/<hash>/engram.db
+ */
+export function getDbPath(launchDir?: string): string {
+  const dir = launchDir || process.cwd();
+  const hash = createHash('sha256').update(dir).digest('hex').slice(0, 12);
+  const projectDir = join(ENGRAM_ROOT, 'projects', hash);
+  mkdirSync(projectDir, { recursive: true });
+  // Write a metadata file so we can map hash → directory
+  const metaPath = join(projectDir, 'meta.json');
+  try {
+    const { writeFileSync, existsSync } = require('node:fs');
+    if (!existsSync(metaPath)) {
+      writeFileSync(metaPath, JSON.stringify({ dir, hash, created: new Date().toISOString() }));
+    }
+  } catch { /* non-critical */ }
+  return join(projectDir, 'engram.db');
+}
 
 const SCHEMA = `
 -- Tier 1: Salience-gated observations
@@ -112,8 +133,7 @@ CREATE TABLE IF NOT EXISTS tool_transitions (
 `;
 
 export function openDatabase(path?: string): Database.Database {
-  const dbPath = path || DB_PATH;
-  mkdirSync(ENGRAM_DIR, { recursive: true });
+  const dbPath = path || getDbPath();
 
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');

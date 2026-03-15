@@ -12,6 +12,7 @@
 
 import { EngramMemory } from './memory.js';
 import { exportMarkdown } from './export.js';
+import { getDbPath } from './db.js';
 
 const cmd = process.argv[2];
 const args = process.argv.slice(3);
@@ -24,6 +25,8 @@ try {
       const stats = memory.getStats();
       const identity = memory.getIdentity();
       console.log('=== Engram Memory ===');
+      console.log(`Project:               ${process.cwd()}`);
+      console.log(`Database:              ${getDbPath()}`);
       console.log(`Observations (Tier 1): ${stats.observations}`);
       console.log(`Patterns (Tier 2):     ${stats.patterns}`);
       console.log(`Identity (Tier 3):     ${stats.identityFacts}`);
