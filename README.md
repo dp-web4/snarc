@@ -131,9 +131,9 @@ Context injection is automatic — engram surfaces relevant memories without bei
 
 ## Origin
 
-engram combines two approaches:
-- [claude-mem](https://github.com/thedotmack/claude-mem)'s auto-capture hooks (the observation pipeline)
-- [SAGE](https://github.com/dp-web4/SAGE)'s salience-gated memory architecture (the filtering and consolidation)
+engram is a lightweight spinoff from [SAGE](https://github.com/dp-web4/SAGE) (Situation-Aware Governance Engine) — a cognition kernel for edge AI that runs a continuous consciousness loop with salience-gated memory, metabolic states, and trust dynamics. SAGE's SNARC attention system, multi-tier memory architecture, and sleep consolidation cycles are adapted here into a practical Claude Code plugin.
+
+The observation pipeline draws from [claude-mem](https://github.com/thedotmack/claude-mem)'s auto-capture hooks. The filtering and consolidation draw from SAGE. See [COMPARISON.md](COMPARISON.md) for a detailed side-by-side.
 
 The key insight: capturing everything is noisy. Capturing nothing loses context. Salience scoring finds the middle — capture what your attention system flags as important, consolidate patterns during downtime, forget the rest.
 
