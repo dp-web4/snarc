@@ -20,6 +20,7 @@ export interface SearchResult {
   id: number;
   summary: string;
   salience?: number;
+  confidence?: number;
   ts?: string;
   kind?: string;
 }
@@ -135,6 +136,7 @@ export class EngramMemory {
           id: row.id,
           summary: row.summary,
           kind: row.kind,
+          confidence: row.confidence,
         });
       }
     } catch { /* FTS query syntax error — skip */ }
@@ -245,7 +247,7 @@ export class EngramMemory {
     const results = this.search(query, limit * 2) // overfetch, then filter
       .filter(r =>
         (r.tier === 1 && (r.salience || 0) >= 0.5) ||
-        (r.tier === 2)
+        (r.tier === 2 && (r.confidence || 0) >= 0.6)
       )
       .slice(0, limit);
     if (results.length === 0) return '';
