@@ -73,6 +73,7 @@ engram's tiers are about *cognitive function* (different memories serve differen
 **engram**: Push + pull.
 - **SessionStart**: Automatically injects a briefing — recent patterns, high-salience observations, identity facts. Claude starts every session knowing what happened recently.
 - **UserPromptSubmit**: Searches for memories related to your prompt and injects them via `additionalContext`. Most prompts pass silently (no match = no injection). When there's a match, Claude sees it without you asking.
+- **PostCompact**: When Claude Code compacts the conversation, engram runs a mid-session dream cycle (consolidates observations from the first half of the session) then re-injects the now-enriched briefing. The session gets smarter as it goes — patterns discovered mid-session carry into the second half.
 - **MCP tools**: Available for explicit queries when you want to dig deeper.
 
 The UX rationale: if retrieval requires extra steps, nobody does it. Memory that isn't surfaced is memory that doesn't exist. Automatic injection makes the value visible from the first session.

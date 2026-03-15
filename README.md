@@ -93,7 +93,7 @@ Memories are not permanent. Patterns lose 0.05 confidence per day since last see
 |------|------|------|
 | **SessionStart** | Session begins | Inject briefing: recent patterns, high-salience observations, identity facts |
 | **UserPromptSubmit** | Every user message | Search for related memories, inject if found (most prompts pass silently) |
-| **PostCompact** | After context compaction | Re-inject briefing (replaces what compaction lost) |
+| **PostCompact** | After context compaction | Mid-session dream (consolidate observations so far) + re-inject enriched briefing |
 
 All injection is conservative: patterns need confidence >= 0.6, observations need salience >= 0.6, identity needs confidence >= 0.7. Quarantined proposals are never injected. Below those thresholds, engram stays silent.
 
@@ -178,9 +178,10 @@ PostToolUse hook (every tool invocation)
   ├─→ salience >= 0.3? → INSERT Tier 1 (SQLite)
   └─→ Silent pass-through (never blocks Claude Code)
 
-PostCompact hook
+PostCompact hook (compaction = long session = lots of observations)
   │
-  └─→ Re-inject briefing after context compaction
+  ├─→ Mid-session heuristic dream (<100ms) — consolidate so far
+  └─→ Re-inject enriched briefing (now includes fresh patterns)
 
 Stop hook (dream cycle)
   │
