@@ -86,6 +86,20 @@ engram dream            # Trigger manual consolidation
 ## Architecture
 
 ```
+SessionStart hook
+  │
+  └─→ Inject session briefing into Claude's context
+        ├─ Recent patterns (Tier 2)
+        ├─ High-salience observations (Tier 1, salience >= 0.5)
+        └─ Identity facts (Tier 3)
+
+UserPromptSubmit hook (every user message)
+  │
+  ├─→ Extract keywords from prompt (stop words filtered)
+  ├─→ FTS5 search across observations and patterns
+  └─→ If matches found: inject via additionalContext JSON field
+      (most prompts pass silently — no match = no injection)
+
 PostToolUse hook (every tool invocation)
   │
   ├─→ Summarize input/output (truncate to 300 chars)
@@ -99,19 +113,21 @@ PostToolUse hook (every tool invocation)
   ├─→ salience >= 0.3? → INSERT Tier 1 (SQLite)
   └─→ stdout: {"continue": true, "suppressOutput": true}
 
-SessionEnd hook (dream cycle)
+Stop hook (dream cycle)
   │
   ├─→ Tool sequence extraction → Tier 2
   ├─→ Error-fix chain detection → Tier 2
   └─→ Concept clustering → Tier 2
 
-MCP Server (retrieval)
+MCP Server (explicit retrieval, when you want to dig deeper)
   │
   ├─→ engram_search:   FTS5 across Tier 1+2
   ├─→ engram_context:  temporal window query
   ├─→ engram_patterns: Tier 2 retrieval
   └─→ engram_stats:    memory health
 ```
+
+Context injection is automatic — engram surfaces relevant memories without being asked. MCP tools are for when you want to search or explore the memory explicitly.
 
 ## Origin
 
@@ -125,7 +141,15 @@ This is how biological memory works. engram applies it to code.
 
 ## Data
 
-All data stored locally at `~/.engram/engram.db`. No external API calls. No telemetry.
+Each launch directory gets its own isolated database:
+```
+~/.engram/projects/<hash>/engram.db    # observations, patterns, identity
+~/.engram/projects/<hash>/meta.json    # maps hash → directory path
+```
+
+Same pattern as Claude Code's `-c` flag: project context is scoped to where you launched from. Working on SAGE won't surface 4-life patterns. No cross-project noise.
+
+No external API calls. No telemetry. All local.
 
 ## License
 
