@@ -261,6 +261,15 @@ export class EngramMemory {
     return lines.join('\n');
   }
 
+  getSetting(key: string): string | undefined {
+    const row = this.stmts.getSetting.get(key) as { value: string } | undefined;
+    return row?.value;
+  }
+
+  setSetting(key: string, value: string): void {
+    this.stmts.setSetting.run(key, value);
+  }
+
   /** List quarantined identity proposals from deep dream */
   getProposedIdentity(): any[] {
     return this.stmts.getProposedIdentity.all();

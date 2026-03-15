@@ -68,9 +68,10 @@ OBSERVATIONS:
 export async function deepConsolidate(
   stmts: Statements,
   observations: Observation[],
-): Promise<{ patternsCreated: number; proposedIdentity: number }> {
+  autoPromote = false,
+): Promise<{ patternsCreated: number; proposedIdentity: number; autoPromoted: number }> {
   if (observations.length < 3) {
-    return { patternsCreated: 0, proposedIdentity: 0 };
+    return { patternsCreated: 0, proposedIdentity: 0, autoPromoted: 0 };
   }
 
   // Build valid observation ID set for verification
@@ -98,7 +99,7 @@ export async function deepConsolidate(
     ).trim();
   } catch (e: any) {
     console.error(`[engram] Deep consolidation failed: ${e.message?.slice(0, 100)}`);
-    return { patternsCreated: 0, proposedIdentity: 0 };
+    return { patternsCreated: 0, proposedIdentity: 0, autoPromoted: 0 };
   } finally {
     try { unlinkSync(tmpFile); } catch { /* cleanup */ }
   }
@@ -109,17 +110,18 @@ export async function deepConsolidate(
     const jsonMatch = response.match(/\[[\s\S]*\]/);
     if (!jsonMatch) {
       console.error('[engram] Deep consolidation: no JSON array in response');
-      return { patternsCreated: 0, proposedIdentity: 0 };
+      return { patternsCreated: 0, proposedIdentity: 0, autoPromoted: 0 };
     }
     patterns = JSON.parse(jsonMatch[0]);
     if (!Array.isArray(patterns)) throw new Error('not an array');
   } catch (e) {
     console.error(`[engram] Deep consolidation: failed to parse response`);
-    return { patternsCreated: 0, proposedIdentity: 0 };
+    return { patternsCreated: 0, proposedIdentity: 0, autoPromoted: 0 };
   }
 
   let patternsCreated = 0;
   let proposedIdentity = 0;
+  let autoPromoted = 0;
 
   for (const p of patterns) {
     // Validate required fields
@@ -137,18 +139,23 @@ export async function deepConsolidate(
     }
 
     if (p.kind === 'identity') {
-      // QUARANTINE: identity facts from deep dream go to Tier 2 as
-      // "proposed_identity" — NOT auto-promoted to Tier 3.
-      // They need human confirmation or cross-session corroboration.
-      stmts.insertPattern.run(
-        'proposed_identity',
-        `[proposed] ${p.summary}`,
-        p.detail || '',
-        1,
-        JSON.stringify(validSourceIds),
-        p.confidence,
-      );
-      proposedIdentity++;
+      if (autoPromote && p.confidence >= 0.8) {
+        // DANGEROUS: auto-promote to Tier 3 without human review
+        const key = p.summary.split(':')[0]?.trim() || p.summary.slice(0, 50);
+        stmts.upsertIdentity.run(key, p.detail || p.summary, 'deep-dream-auto', p.confidence);
+        autoPromoted++;
+      } else {
+        // DEFAULT: quarantine as proposed_identity in Tier 2
+        stmts.insertPattern.run(
+          'proposed_identity',
+          `[proposed] ${p.summary}`,
+          p.detail || '',
+          1,
+          JSON.stringify(validSourceIds),
+          p.confidence,
+        );
+        proposedIdentity++;
+      }
     } else {
       stmts.insertPattern.run(
         `deep_${p.kind}`,
@@ -162,5 +169,5 @@ export async function deepConsolidate(
     }
   }
 
-  return { patternsCreated, proposedIdentity };
+  return { patternsCreated, proposedIdentity, autoPromoted };
 }

@@ -108,6 +108,12 @@ CREATE TABLE IF NOT EXISTS identity (
   confidence  REAL DEFAULT 0.5
 );
 
+-- Settings (persisted per project directory)
+CREATE TABLE IF NOT EXISTS settings (
+  key         TEXT PRIMARY KEY,
+  value       TEXT NOT NULL
+);
+
 -- Seen-set for novelty detection
 CREATE TABLE IF NOT EXISTS seen_set (
   token       TEXT PRIMARY KEY,
@@ -271,6 +277,9 @@ export function prepareStatements(db: Database.Database) {
     `),
 
     deletePattern: db.prepare(`DELETE FROM patterns WHERE id = ?`),
+
+    getSetting: db.prepare(`SELECT value FROM settings WHERE key = ?`),
+    setSetting: db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`),
 
     getStats: db.prepare(`
       SELECT

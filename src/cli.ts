@@ -71,6 +71,36 @@ async function main() {
       break;
     }
 
+    case 'config': {
+      const key = args[0];
+      const value = args[1];
+
+      if (!key) {
+        // Show all settings
+        const autoPromote = memory.getSetting('auto_promote_identity') || '0';
+        console.log('=== Engram Settings ===');
+        console.log(`auto_promote_identity: ${autoPromote === '1' ? 'ON (dangerous)' : 'OFF (default, quarantine)'}`);
+        console.log('\nUsage: engram config <key> <value>');
+        console.log('  engram config auto_promote_identity 1   # live dangerously');
+        console.log('  engram config auto_promote_identity 0   # back to quarantine');
+        break;
+      }
+
+      if (key === 'auto_promote_identity') {
+        if (value === '1') {
+          memory.setSetting('auto_promote_identity', '1');
+          console.log('auto_promote_identity: ON — deep dream identity facts will auto-promote to Tier 3.');
+          console.log('This is dangerous. Deep dream can produce convincing but wrong identity facts.');
+        } else {
+          memory.setSetting('auto_promote_identity', '0');
+          console.log('auto_promote_identity: OFF — identity facts quarantined for human review.');
+        }
+      } else {
+        console.error(`Unknown setting: ${key}`);
+      }
+      break;
+    }
+
     case 'review': {
       const proposals = memory.getProposedIdentity();
       if (proposals.length === 0) {
@@ -120,11 +150,16 @@ async function main() {
       const sessionId = args.find(a => !a.startsWith('-')) || 'manual-dream';
 
       if (deep) {
-        console.log('Running deep dream cycle (LLM-powered)...');
+        const autoPromote = memory.getSetting('auto_promote_identity') === '1';
+        console.log(`Running deep dream cycle (LLM-powered)${autoPromote ? ' [auto-promote ON]' : ''}...`);
         const obs = memory.getContext(undefined, undefined, 50);
-        const stmts = (memory as any).stmts; // access internals for deep consolidation
-        const result = await deepConsolidate(stmts, obs);
-        console.log(`Deep dream complete: ${result.patternsCreated} patterns, ${result.proposedIdentity} proposed identity (quarantined)`);
+        const stmts = (memory as any).stmts;
+        const result = await deepConsolidate(stmts, obs, autoPromote);
+        const parts = [];
+        if (result.patternsCreated > 0) parts.push(`${result.patternsCreated} patterns`);
+        if (result.proposedIdentity > 0) parts.push(`${result.proposedIdentity} proposed identity (quarantined)`);
+        if (result.autoPromoted > 0) parts.push(`${result.autoPromoted} identity auto-promoted to Tier 3`);
+        console.log(`Deep dream complete: ${parts.join(', ') || 'nothing extracted'}`);
       } else {
         memory.initSession(sessionId);
         const result = memory.endSession();
@@ -144,7 +179,8 @@ Usage:
   engram dream [--deep]     Trigger consolidation (--deep uses LLM)
   engram review             List quarantined identity proposals
   engram promote <id> k v   Promote proposal to Tier 3 identity
-  engram reject <id>        Delete a quarantined proposal`);
+  engram reject <id>        Delete a quarantined proposal
+  engram config [key] [val] View/set persistent settings`);
   }
 }
 
