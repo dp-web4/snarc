@@ -1,144 +1,211 @@
-# engram — a profile
+# engram — Review Summary & Forward Plan
 
-**What he is:** A memory system that pays attention.
+## What this document is
 
-**What he isn't:** A logger. A diary. A search engine with delusions of grandeur.
-
----
-
-## The short version
-
-engram is ~2,000 lines of TypeScript that gives Claude Code something it doesn't have: the ability to remember what mattered, forget what didn't, and — during the gaps between sessions — consolidate what it learned into patterns it can use next time.
-
-He sits in the hot path of every tool call. He watches. He scores. Most of what he sees, he throws away. The stuff that clears the bar — the errors that broke things, the fixes that worked, the files that kept coming back, the transitions that surprised him — that gets kept. Everything else evicts from a 50-slot circular buffer and is gone.
-
-At session end, he sleeps. And while sleeping, he dreams: extracting workflows from raw tool sequences, linking errors to their fixes, clustering observations around shared files. Optionally, if you trust him enough, he dreams deeper — sending his observations to an LLM for semantic consolidation. But even then, the identity facts he extracts are quarantined. He doesn't trust his own inferences about who you are or what your project is until a human confirms them.
-
-That's the whole thesis: **capture selectively, consolidate during downtime, forget the rest, and never inject a memory you haven't earned confidence in.**
+A consolidated record of the four-round review process engram went through, what was found, what got fixed, what's still open, and where we go from here.
 
 ---
 
-## Vital stats
+## Review history
 
-| | |
-|---|---|
-| **Born** | 2025, spun off from [SAGE](https://github.com/dp-web4/SAGE) |
-| **Version** | 0.3.0 |
-| **Size** | ~1,949 lines of TypeScript, 8 hook handlers |
-| **Dependencies** | 3 runtime (better-sqlite3, MCP SDK, zod) |
-| **LLM calls in hot path** | Zero |
-| **Latency per observation** | <10ms |
-| **Test coverage** | Zero (his most honest weakness) |
+engram was reviewed four times by Nova, each round examining the latest state of the repo. The reviews got progressively more specific as early issues were addressed and deeper ones surfaced.
 
----
+### Review 1 — Initial assessment
 
-## Personality traits
+**Verdict:** *"Good bones, good instinct, but still too eager to believe its own summaries."*
 
-**Selective.** He scores every observation on five dimensions — Surprise, Novelty, Arousal, Reward, Conflict — and gates storage at 0.3 salience. A routine `git status` scores low and evicts. A test failure after a refactor scores high and persists. He doesn't remember everything. He remembers the moment you tripped.
+**What looked strong:**
+- Core premise (salience-gated capture vs. log-everything) is genuinely solid
+- Architecture is unusually clean for an early repo — complete product shape, not a toy
+- SNARC scorer is real, not vaporware — actual heuristic scoring with explicit weights
+- Right instinct to avoid LLM calls in the hot path
 
-**Epistemically cautious.** When he injects a memory, he labels it. Tier 1: "observed — directly recorded." Tier 2: "inferred — heuristic, may not be accurate." Tier 3: "auto-extracted, verify if unsure." He tells you what he knows versus what he guessed. Most memory systems don't bother.
+**What looked weak:**
+- Epistemic confidence — system re-injects its own compressed interpretations with no labeling of certainty
+- No evaluation discipline — no benchmarks, no precision/recall, no ablations
+- Thresholds tuned by taste, not evidence (0.3 salience, SNARC weights, confidence formulas)
+- Pattern extraction is semantically shallow — catches surface routines, misses intent
+- Automatic context injection is the highest-risk surface — wrong memory injected with authority creates self-reinforcing mistakes
 
-**Self-forgetting.** Patterns lose 0.05 confidence per day. Observations decay after 7 days. Anything below 0.1 confidence gets pruned. He doesn't just accumulate — he forgets. Because a memory system that only accumulates is a distortion engine, and he knows it.
+**Recommended priorities (in order):**
+1. Add evaluation before adding features
+2. Separate observed fact from inferred pattern
+3. Make injection conservative by default
+4. Add explicit forgetting / decay / invalidation
+5. Harden secret handling and project isolation
 
-**Quietly present.** Most of the time, he's silent. Session starts get a briefing if there's something worth saying. User prompts get augmented if there's a relevant memory. If there's nothing — and usually there isn't — he passes through without a word. The best tool behavior is the kind you don't notice until it helps.
+### Review 2 — After first round of fixes
 
-**Quarantine-minded.** Deep dream can extract identity facts — persistent truths about your project. But he doesn't trust himself with those. They go to quarantine by default. You review them. You promote or reject. He doesn't get to decide what's true about you.
+**Verdict:** *"Good bones, better skepticism, still under-instrumented and a little sloppier than the new README posture implies."*
 
----
+**What improved:**
+- Reactive recall path described as conservative, session-start injection got stricter
+- Epistemic labeling added (Tier 1 = "observed", Tier 2 = "inferred", Tier 3 = "verify if unsure")
 
-## What he's made of
+**What didn't improve enough:**
+- Reactive Tier 2 confidence filter looser than advertised — code comment promises more skepticism than the filter implements
+- Probable double-decay bug in consolidation (`stmts.decayPatterns.run()` called twice per dream cycle)
 
-```
-Tier 0   Buffer       50 slots, in-memory, FIFO. Raw. Ephemeral.
-Tier 1   Observations Salience-gated. SQLite. What happened.
-Tier 2   Patterns     Consolidated. Inferred. What recurs.
-Tier 3   Identity     Human-confirmed. Persistent. What's true.
-```
+**Still unresolved:**
+- Evaluation framework
+- Secret filtering / sensitive path scrubbing
+- Provenance chain from Tier 2 patterns back to source observations
+- Salience weight calibration from real usage data
 
-Each project gets its own database. SAGE work doesn't bleed into your web app. No cross-contamination.
+### Review 3 — After second round of fixes
 
-The SNARC scorer — borrowed from SAGE, which borrowed from Richard Aragon's Transformer Sidecar — runs five heuristics in under 10ms:
+**Verdict:** *"Good bones, increasingly self-correcting, still not validated enough to trust at scale."*
 
-- **Surprise**: How unusual was this tool transition? Tracked via frequency map.
-- **Novelty**: Are these files/tokens new? Tracked via seen-set.
-- **Arousal**: Errors, warnings, state changes? Regex pattern matching.
-- **Reward**: Did something succeed? Test pass, build complete, commit landed.
-- **Conflict**: Does this contradict what just happened? Fail-after-success gets flagged.
+**What improved:**
+- Specific bugs from review 2 appeared fixed
+- Project now shows a pattern of responding to critique with narrower, safer behavior — a strong sign of seriousness
 
-Weighted sum. Threshold at 0.3. Below: forgotten. Above: kept.
+**Assessment updated:**
+- Concept: strong
+- Implementation discipline: improving
+- Safety posture: better, but incomplete
+- Scientific / product validation: still weak
 
----
+**The shift:** No longer "sloppy optimism with a good idea." Now closer to "promising memory substrate with early signs of engineering maturity, but still missing the evidence layer."
 
-## What he's good at
+**Sharpest next move:** Build a tiny evaluation harness before adding anything else.
 
-- Remembering the fix you applied to that obscure build error three sessions ago
-- Noticing that you always do Edit → test → Edit when working on a specific module
-- Staying out of the way when he has nothing useful to say
-- Not calling an LLM when a heuristic will do
-- Telling you the difference between what he observed and what he inferred
-- Forgetting
+### Review 4 — After deep dream was added
 
----
+**Verdict:** *"Valuable upgrade, risky memory fiction engine, keep it opt-in and quarantined until it earns trust."*
 
-## What he's bad at
+**Key concerns addressed:**
+- Identity auto-promotion → quarantined. Deep dream identity facts go to Tier 2 as `proposed_identity`, not Tier 3
+- Shell interpolation → fixed. Prompt passed via stdin instead of bash string interpolation
+- Source ID validation → added. Fabricated IDs lower confidence by 0.2
 
-- **Proving he helps.** No evaluation harness. No precision/recall metrics. No A/B comparison against a no-memory baseline. He claims to be useful, but the evidence is vibes. Nova called this out four times. It's still true.
+**New risk introduced:**
+- "Narrative overreach" — deep dream can produce output that looks like improvement while quietly reducing truthfulness (summary-on-summary epistemic risk)
 
-- **Semantic understanding.** His pattern extraction is mechanical: 3-step tool windows, error→fix within 5 observations, file-based clusters. "Edit → Bash → Edit" could be TDD or debugging or refactoring — he can't tell the difference. He sees shape, not intent.
-
-- **Detecting errors across languages.** His arousal scoring runs regex: `error|Error|ERROR|FAIL|fail|panic|exception`. A Rust compiler diagnostic that doesn't contain those words is invisible to him. A log line that says "error" in a success message is a false positive. Brittle.
-
-- **Secret hygiene.** He stores summaries of tool I/O. If that I/O contained an API key, a credential, a `.env` dump — it's in his database. Export makes it worse. No scrubbing policy exists.
-
-- **Completing his own features.** `importMarkdown()` is a stub. It counts records and returns. Fleet portability is half-built.
-
-- **Self-calibration.** The 0.3 threshold, the SNARC weights, the confidence formulas — all chosen by instinct. No evidence they're right. Could be too aggressive. Could be too loose. Nobody's measured.
-
----
-
-## What others say about him
-
-Nova reviewed him four times. The arc:
-
-1. *"Good bones, good instinct, but still too eager to believe its own summaries."*
-2. *"Good bones, better skepticism, still under-instrumented and a little sloppier than the new README posture implies."*
-3. *"Good bones, increasingly self-correcting, still not validated enough to trust at scale."*
-4. *"Valuable upgrade, risky memory fiction engine, keep it opt-in and quarantined until it earns trust."*
-
-The consistent thread: the concept is right, the execution is improving, the evidence is absent. He's a sharp prototype, not a hardened system. Promising research infrastructure, not trustworthy production memory.
-
-The most cutting observation, from review one: *"better at remembering mechanics than meaning."* Still true.
+**Still open:**
+- Evaluation harness
+- Deduplication of patterns across sessions
+- Contradiction handling for conflicting patterns
 
 ---
 
-## His relationship to sleep
+## Current state of known issues
 
-He dreams. Not metaphorically — the consolidation system literally runs during the gap between sessions, extracting patterns from raw observations the way sleep consolidates episodic memory into procedural knowledge.
+### Fixed
+- [x] Epistemic labeling on injected memories
+- [x] Conservative injection thresholds (patterns >= 0.6, observations >= 0.6, identity >= 0.7)
+- [x] Confidence decay (patterns -0.05/day, pruned below 0.1)
+- [x] Observation decay after 7 days
+- [x] Identity quarantine for deep dream proposals
+- [x] Shell interpolation vulnerability in deep dream
+- [x] Source ID validation for deep dream output
+- [x] Double-decay bug in consolidation
+- [x] Reactive Tier 2 confidence filter
 
-Heuristic dream: always runs, <100ms, finds mechanical patterns.
-Deep dream: opt-in, sends observations to an LLM, finds semantic patterns.
-
-The tension: deep dream produces better-looking output but introduces "narrative overreach" — it can summarize observations into patterns that sound insightful but subtly distort what actually happened. Nova called this a "memory fiction engine." The quarantine system exists because of this risk.
-
-A memory system that only accumulates is a distortion engine.
-A memory system that narrativizes too freely is a fiction engine.
-The narrow path between those two failure modes is where he tries to live.
-
----
-
-## His one honest claim
-
-He pays attention so you don't have to tell him what to remember.
-
-Most of the time, that means staying silent. Sometimes it means surfacing the error-fix chain from three sessions ago when you hit the same error today. Occasionally it means noticing a workflow pattern you didn't know you had.
-
-Whether that's actually useful — whether the memories he keeps are the right ones, whether the patterns he extracts are real, whether his injections help more than they distort — is an open question. He doesn't have the evaluation data to answer it yet.
-
-But the architecture is honest about that. The labels say "inferred." The confidence scores decay. The identity facts quarantine. The system is designed to be wrong gracefully, not to pretend it's right.
-
-That's the best he can offer right now: **a memory that knows it might be wrong, and says so.**
+### Open
+- [ ] **No evaluation harness** — no way to measure whether memory helps or hurts task outcomes. Flagged in all four reviews. The single most important gap.
+- [ ] **No secret filtering** — tool I/O summaries may contain API keys, credentials, .env contents. Export amplifies this. No scrubbing policy exists.
+- [ ] **No provenance chain** — Tier 2 patterns have `source_ids` but no real audit trail back to the observations that produced them. Can't inspect why a pattern exists.
+- [ ] **No threshold calibration** — SNARC weights (0.25/0.20/0.20/0.25/0.10), salience threshold (0.3), confidence formulas all chosen by instinct. No evidence they're optimal or even approximately correct.
+- [ ] **Shallow pattern extraction** — heuristic dream sees 3-step tool windows and file clusters. Can't distinguish TDD from debugging from refactoring. Sees shape, not intent.
+- [ ] **Brittle error detection** — regex-based arousal scoring misses language-specific diagnostics and produces false positives on log lines containing error keywords in non-error contexts.
+- [ ] **Incomplete fleet portability** — `importMarkdown()` is a stub that counts records and returns. Export works; import doesn't.
+- [ ] **No test coverage** — zero tests. No regression protection against future changes breaking scoring, injection, or consolidation logic.
+- [ ] **No pattern deduplication** — same pattern can be extracted across multiple sessions without merging.
+- [ ] **No contradiction handling** — conflicting patterns from different sessions coexist without resolution.
 
 ---
 
-*v0.3.0 — salience-gated memory for Claude Code*
-*MIT License*
+## Forward plan
+
+Ordered by impact and dependency. Each phase should be completed before moving to the next.
+
+### Phase 1 — Prove it works (evaluation)
+
+The single most important thing. Everything else is optimization of a system we can't yet prove is useful.
+
+- [ ] **Build a minimal evaluation harness**
+  - Define 5–10 representative tasks (bug fix, feature add, refactor, etc.)
+  - Run each task with and without engram memory
+  - Measure: relevant recall count, irrelevant injection count, task completion quality
+  - Establish baseline numbers before any further feature work
+
+- [ ] **Add harmful-recall regression tests**
+  - Craft scenarios where stale or wrong memories would degrade performance
+  - Verify injection thresholds prevent them from surfacing
+  - Run as part of CI
+
+- [ ] **Threshold sensitivity analysis**
+  - Vary salience threshold (0.2, 0.3, 0.4, 0.5) across evaluation tasks
+  - Vary SNARC weights
+  - Find the configuration that maximizes useful recall and minimizes noise
+
+### Phase 2 — Safety and hygiene
+
+Before any user beyond us trusts this system with real projects.
+
+- [ ] **Secret filtering**
+  - Detect and redact common secret patterns (API keys, tokens, passwords, connection strings) before storing observation summaries
+  - Strip `.env` file contents, credential file paths
+  - Apply to both storage and export paths
+
+- [ ] **Basic test suite**
+  - Unit tests for SNARC scoring (known inputs → expected scores)
+  - Integration tests for capture → store → retrieve pipeline
+  - Regression tests for injection thresholds
+  - Dream cycle tests (heuristic and deep)
+
+- [ ] **Provenance tracking**
+  - Tier 2 patterns should link back to specific Tier 1 observation IDs
+  - CLI command to inspect a pattern's source observations
+  - "Why did engram remember this?" should be answerable
+
+### Phase 3 — Quality improvements
+
+Make the memories better, not just safer.
+
+- [ ] **Pattern deduplication**
+  - Merge functionally equivalent patterns across sessions
+  - Boost confidence when the same pattern is independently discovered
+
+- [ ] **Contradiction handling**
+  - Detect when a new pattern conflicts with an existing one
+  - Lower confidence on the older pattern or flag for human review
+
+- [ ] **Richer error detection**
+  - Language-aware arousal scoring (Rust diagnostics, Go error returns, Python tracebacks with non-standard formatting)
+  - Reduce false positives from log lines containing "error" in benign contexts
+
+- [ ] **Complete fleet import**
+  - Implement `importMarkdown()` for real — parse exported markdown, merge into local Tier 2/3
+  - Handle conflicts between imported and local patterns
+
+### Phase 4 — Calibration and maturity
+
+Once we have evaluation data and real usage patterns.
+
+- [ ] **Data-driven threshold tuning**
+  - Use evaluation harness results to set SNARC weights and salience threshold empirically
+  - Per-project calibration if usage patterns vary significantly
+
+- [ ] **Deep dream quality controls**
+  - Measure deep dream pattern accuracy against heuristic baseline
+  - Tighten or loosen quarantine policy based on measured false-positive rate
+
+- [ ] **Usage telemetry (opt-in, local)**
+  - Track which injected memories get acted on vs. ignored
+  - Feed back into scoring weights over time
+
+---
+
+## The throughline
+
+Nova's consistent observation across four reviews: **the concept is right, the execution is improving, the evidence is absent.**
+
+The forward plan addresses that directly. Phase 1 exists because nothing else matters until we can answer: *does remembered context help more than it distorts?*
+
+Everything after Phase 1 assumes the answer is yes — or tells us specifically what to fix so it becomes yes.
+
+---
+
+*engram v0.3.0 — salience-gated memory for Claude Code*
