@@ -1,17 +1,17 @@
 {
-  "name": "engram",
-  "description": "Salience-gated memory for Claude Code — captures what matters, forgets what doesn't, consolidates patterns while sleeping. SNARC scoring (Surprise, Novelty, Arousal, Reward, Conflict) filters observations at capture time. Four-tier memory: buffer → observations → patterns → identity. Automatic context injection on session start, prompt submit, and post-compaction. Dream cycles extract workflows and error-fix chains. Confidence decay prevents memory distortion.",
+  "name": "snarc",
+  "description": "SNARC — salience-gated memory for Claude Code. Scores every tool use on 5 dimensions (Surprise, Novelty, Arousal, Reward, Conflict) at capture time. Four-tier memory: buffer → observations → patterns → identity. Automatic context injection, dream cycles, confidence decay.",
   "version": "0.3.0",
   "author": {
     "name": "dp-web4",
     "email": "dp@metalinxx.io"
   },
-  "homepage": "https://github.com/dp-web4/engram",
+  "homepage": "https://github.com/dp-web4/snarc",
   "category": "productivity",
   "keywords": ["memory", "persistence", "salience", "SNARC", "context", "attention", "dream-cycle", "SAGE"],
   "strict": true,
   "mcpServers": {
-    "engram": {
+    "snarc": {
       "command": "node",
       "args": ["${CLAUDE_PLUGIN_ROOT}/dist/src/server.js"]
     }

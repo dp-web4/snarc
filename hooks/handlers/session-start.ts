@@ -26,7 +26,7 @@ try {
 
   // Inject into Claude's context (plain text to stdout on SessionStart)
   if (briefing) {
-    process.stdout.write(`<engram-context>\n${briefing}\n</engram-context>\n`);
+    process.stdout.write(`<snarc-context>\n${briefing}\n</snarc-context>\n`);
   }
 } catch (e) {
   // Silent failure — engram should never block Claude Code

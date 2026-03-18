@@ -1,11 +1,11 @@
 {
-  "name": "engram-memory",
+  "name": "snarc",
   "version": "0.3.0",
-  "description": "Salience-gated memory for Claude Code — captures what matters, forgets what doesn't, consolidates patterns while sleeping",
+  "description": "SNARC — salience-gated memory for Claude Code. Captures what matters, forgets what doesn't, consolidates patterns while sleeping.",
   "type": "module",
   "main": "dist/src/server.js",
   "bin": {
-    "engram": "dist/src/cli.js"
+    "snarc": "dist/src/cli.js"
   },
   "files": [
     "dist/",
@@ -51,11 +51,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dp-web4/engram.git"
+    "url": "https://github.com/dp-web4/snarc.git"
   },
-  "homepage": "https://github.com/dp-web4/engram",
+  "homepage": "https://github.com/dp-web4/snarc",
   "bugs": {
-    "url": "https://github.com/dp-web4/engram/issues"
+    "url": "https://github.com/dp-web4/snarc/issues"
   },
   "author": "dp-web4 <dp@metalinxx.io>"
 }

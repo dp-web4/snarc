@@ -2,10 +2,10 @@
  * Engram MCP Server — 4 retrieval tools for Claude Code.
  *
  * Tools:
- *   engram_search   — query across all tiers, ranked by salience
- *   engram_context  — observations around a timestamp or session
- *   engram_patterns — consolidated patterns from dream cycles
- *   engram_stats    — memory health dashboard
+ *   snarc_search   — query across all tiers, ranked by salience
+ *   snarc_context  — observations around a timestamp or session
+ *   snarc_patterns — consolidated patterns from dream cycles
+ *   snarc_stats    — memory health dashboard
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -56,14 +56,14 @@ function resolveProjectDb(): string {
 const memory = new EngramMemory(resolveProjectDb());
 
 const server = new Server(
-  { name: 'engram', version: '0.1.0' },
+  { name: 'snarc', version: '0.3.0' },
   { capabilities: { tools: {} } },
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
-      name: 'engram_search',
+      name: 'snarc_search',
       description: 'Search engram memory across all tiers — observations, patterns, and identity. Results ranked by salience and tier.',
       inputSchema: {
         type: 'object' as const,
@@ -75,7 +75,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
-      name: 'engram_context',
+      name: 'snarc_context',
       description: 'Get observations around a specific timestamp or from a specific session. Useful for "what happened around the time of this error?"',
       inputSchema: {
         type: 'object' as const,
@@ -87,7 +87,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
-      name: 'engram_patterns',
+      name: 'snarc_patterns',
       description: 'Retrieve consolidated patterns from dream cycles — recurring workflows, error-fix chains, concept clusters.',
       inputSchema: {
         type: 'object' as const,
@@ -98,7 +98,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
-      name: 'engram_stats',
+      name: 'snarc_stats',
       description: 'Memory health dashboard — tier sizes, salience distribution, session count, seen token count.',
       inputSchema: {
         type: 'object' as const,
@@ -112,7 +112,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   switch (name) {
-    case 'engram_search': {
+    case 'snarc_search': {
       const query = (args as any).query as string;
       const limit = (args as any).limit as number || 10;
       const results = memory.search(query, limit);
@@ -128,7 +128,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    case 'engram_context': {
+    case 'snarc_context': {
       const sessionId = (args as any).session_id as string | undefined;
       const timestamp = (args as any).timestamp as string | undefined;
       const limit = (args as any).limit as number || 20;
@@ -145,7 +145,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    case 'engram_patterns': {
+    case 'snarc_patterns': {
       const query = (args as any).query as string | undefined;
       const kind = (args as any).kind as string | undefined;
 
@@ -168,7 +168,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    case 'engram_stats': {
+    case 'snarc_stats': {
       const stats = memory.getStats();
       const identity = memory.getIdentity();
       return {

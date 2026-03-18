@@ -4,10 +4,10 @@
  *
  * Usage:
  *   engram stats          — memory health dashboard
- *   engram search <query> — search across all tiers
- *   engram patterns       — list consolidated patterns
- *   engram export         — dump Tier 2+3 to markdown (stdout)
- *   engram dream          — trigger manual consolidation
+ *   snarc search <query> — search across all tiers
+ *   snarc patterns       — list consolidated patterns
+ *   snarc export         — dump Tier 2+3 to markdown (stdout)
+ *   snarc dream          — trigger manual consolidation
  */
 
 import { EngramMemory } from './memory.js';
@@ -25,7 +25,7 @@ async function main() {
     case 'stats': {
       const stats = memory.getStats();
       const identity = memory.getIdentity();
-      console.log('=== Engram Memory ===');
+      console.log('=== SNARC Memory ===');
       console.log(`Project:               ${process.cwd()}`);
       console.log(`Database:              ${getDbPath()}`);
       console.log(`Observations (Tier 1): ${stats.observations}`);
@@ -78,11 +78,11 @@ async function main() {
       if (!key) {
         // Show all settings
         const autoPromote = memory.getSetting('auto_promote_identity') || '0';
-        console.log('=== Engram Settings ===');
+        console.log('=== SNARC Settings ===');
         console.log(`auto_promote_identity: ${autoPromote === '1' ? 'ON (dangerous)' : 'OFF (default, quarantine)'}`);
         console.log('\nUsage: engram config <key> <value>');
-        console.log('  engram config auto_promote_identity 1   # live dangerously');
-        console.log('  engram config auto_promote_identity 0   # back to quarantine');
+        console.log('  snarc config auto_promote_identity 1   # live dangerously');
+        console.log('  snarc config auto_promote_identity 0   # back to quarantine');
         break;
       }
 
@@ -115,8 +115,8 @@ async function main() {
         if (p.detail) console.log(`    ${p.detail}`);
         console.log();
       }
-      console.log('To promote:  engram promote <id> "<key>" "<value>"');
-      console.log('To reject:   engram reject <id>');
+      console.log('To promote:  snarc promote <id> "<key>" "<value>"');
+      console.log('To reject:   snarc reject <id>');
       break;
     }
 
@@ -169,18 +169,18 @@ async function main() {
     }
 
     default:
-      console.log(`engram — salience-gated memory for Claude Code
+      console.log(`snarc — salience-gated memory for Claude Code
 
 Usage:
-  engram stats              Memory health dashboard
-  engram search <query>     Search across all tiers
-  engram patterns [kind]    List consolidated patterns
-  engram export             Export Tier 2+3 to markdown
-  engram dream [--deep]     Trigger consolidation (--deep uses LLM)
-  engram review             List quarantined identity proposals
-  engram promote <id> k v   Promote proposal to Tier 3 identity
-  engram reject <id>        Delete a quarantined proposal
-  engram config [key] [val] View/set persistent settings`);
+  snarc stats              Memory health dashboard
+  snarc search <query>     Search across all tiers
+  snarc patterns [kind]    List consolidated patterns
+  snarc export             Export Tier 2+3 to markdown
+  snarc dream [--deep]     Trigger consolidation (--deep uses LLM)
+  snarc review             List quarantined identity proposals
+  snarc promote <id> k v   Promote proposal to Tier 3 identity
+  snarc reject <id>        Delete a quarantined proposal
+  snarc config [key] [val] View/set persistent settings`);
   }
 }
 

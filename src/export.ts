@@ -12,7 +12,7 @@ export function exportMarkdown(memory: EngramMemory): string {
   const stats = memory.getStats();
 
   const lines: string[] = [
-    '# Engram Memory Export',
+    '# SNARC Memory Export',
     `Generated: ${new Date().toISOString()}`,
     `Observations: ${stats.observations} | Patterns: ${stats.patterns} | Sessions: ${stats.sessions}`,
     '',

@@ -98,7 +98,7 @@ export async function deepConsolidate(
       },
     ).trim();
   } catch (e: any) {
-    console.error(`[engram] Deep consolidation failed: ${e.message?.slice(0, 100)}`);
+    console.error(`[snarc] Deep consolidation failed: ${e.message?.slice(0, 100)}`);
     return { patternsCreated: 0, proposedIdentity: 0, autoPromoted: 0 };
   } finally {
     try { unlinkSync(tmpFile); } catch { /* cleanup */ }
@@ -109,13 +109,13 @@ export async function deepConsolidate(
   try {
     const jsonMatch = response.match(/\[[\s\S]*\]/);
     if (!jsonMatch) {
-      console.error('[engram] Deep consolidation: no JSON array in response');
+      console.error('[snarc] Deep consolidation: no JSON array in response');
       return { patternsCreated: 0, proposedIdentity: 0, autoPromoted: 0 };
     }
     patterns = JSON.parse(jsonMatch[0]);
     if (!Array.isArray(patterns)) throw new Error('not an array');
   } catch (e) {
-    console.error(`[engram] Deep consolidation: failed to parse response`);
+    console.error(`[snarc] Deep consolidation: failed to parse response`);
     return { patternsCreated: 0, proposedIdentity: 0, autoPromoted: 0 };
   }
 

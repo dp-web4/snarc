@@ -253,7 +253,7 @@ export class EngramMemory {
       .slice(0, limit);
     if (results.length === 0) return '';
 
-    const lines = ['Related engram memories (verify before relying on these):'];
+    const lines = ['Related SNARC memories (verify before relying on these):'];
     for (const r of results) {
       const provenance = r.tier === 1 ? 'observed' : 'inferred';
       lines.push(`  - [${provenance}${r.kind ? ` ${r.kind}` : ''}] ${r.summary}`);

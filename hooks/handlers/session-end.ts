@@ -47,7 +47,7 @@ async function main() {
     memory.close();
 
     if (parts.length > 0) {
-      process.stderr.write(`[engram] Dream cycle: ${parts.join(', ')}\n`);
+      process.stderr.write(`[snarc] Dream cycle: ${parts.join(', ')}\n`);
     }
   } catch (e) {
     // Silent failure

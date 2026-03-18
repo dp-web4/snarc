@@ -41,11 +41,11 @@ async function main() {
       if (result.patternsCreated > 0) parts.push(`${result.patternsCreated} patterns consolidated`);
 
       const contextLines = [];
-      if (parts.length > 0) contextLines.push(`[engram mid-session dream: ${parts.join(', ')}]`);
+      if (parts.length > 0) contextLines.push(`[snarc mid-session dream: ${parts.join(', ')}]`);
       contextLines.push(briefing);
 
       const output = JSON.stringify({
-        additionalContext: `<engram-context>\n${contextLines.join('\n')}\n</engram-context>`,
+        additionalContext: `<snarc-context>\n${contextLines.join('\n')}\n</snarc-context>`,
       });
       process.stdout.write(output);
     }
