@@ -1,9 +1,9 @@
-# Show HN: engram — salience-gated memory for Claude Code (captures what matters, forgets what doesn't)
+# Show HN: SNARC — salience-gated memory for Claude Code (captures what matters, forgets what doesn't)
 
-**GitHub**: https://github.com/dp-web4/engram
+**GitHub**: https://github.com/dp-web4/SNARC
 **License**: MIT
 
-Every Claude Code memory plugin captures everything and searches later. engram does the opposite: it scores every tool use on 5 salience dimensions at capture time and only stores what matters. Low-salience observations (routine `ls`, `git status`) evict from a circular buffer. High-salience ones (test failures, successful builds, novel file writes) persist.
+Every Claude Code memory plugin captures everything and searches later. SNARC does the opposite: it scores every tool use on 5 salience dimensions at capture time and only stores what matters. Low-salience observations (routine `ls`, `git status`) evict from a circular buffer. High-salience ones (test failures, successful builds, novel file writes) persist.
 
 **The scoring (SNARC — Surprise, Novelty, Arousal, Reward, Conflict):**
 
@@ -17,7 +17,7 @@ Scoring is pure heuristic TypeScript — no LLM calls, <10ms per observation.
 
 **What makes it different from claude-mem, Total Recall, ContextForge, etc.:**
 
-1. **Salience-gated capture, not log-everything.** Most memory systems store first, search later. engram filters at capture time. A routine `engram stats` call (surprise=0, novelty=0, arousal=0) scores below threshold and evicts. A test failure after a refactor (high surprise + high arousal + high conflict) scores above threshold and persists.
+1. **Salience-gated capture, not log-everything.** Most memory systems store first, search later. SNARC filters at capture time. A routine `SNARC stats` call (surprise=0, novelty=0, arousal=0) scores below threshold and evicts. A test failure after a refactor (high surprise + high arousal + high conflict) scores above threshold and persists.
 
 2. **Automatic context injection.** 5 hooks — SessionStart (briefing), UserPromptSubmit (reactive recall), PostToolUse (capture), PostCompact (mid-session dream + re-inject), Stop (dream cycle). You never need to query it manually.
 

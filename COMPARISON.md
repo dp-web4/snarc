@@ -1,17 +1,17 @@
-# engram vs claude-mem
+# SNARC vs claude-mem
 
 Both are persistent memory systems for Claude Code. They solve the same problem (sessions are stateless) but with fundamentally different philosophies.
 
 ## The Core Difference
 
 **claude-mem** captures everything, compresses later.
-**engram** scores everything, captures only what matters.
+**SNARC** scores everything, captures only what matters.
 
-claude-mem is a flight recorder. engram is an attention system.
+claude-mem is a flight recorder. SNARC is an attention system.
 
 ## Architecture Comparison
 
-| | claude-mem | engram |
+| | claude-mem | SNARC |
 |---|---|---|
 | **Philosophy** | Record everything, retrieve by search | Score everything, store only what's salient |
 | **Capture** | Every tool invocation stored | Every tool invocation *scored* — only above-threshold stored |
@@ -28,7 +28,7 @@ claude-mem is a flight recorder. engram is an attention system.
 
 claude-mem treats every tool invocation equally. A routine `ls` and a critical test failure get the same storage treatment — both recorded, both compressed, both retrievable.
 
-engram scores every observation on five dimensions before deciding whether to store it:
+SNARC scores every observation on five dimensions before deciding whether to store it:
 
 | Dimension | What it measures | Why it matters |
 |-----------|-----------------|----------------|
@@ -55,7 +55,7 @@ This is how biological memory works. You don't remember every step you took toda
 | Timeline | Chronological context | Variable |
 | Full detail | Complete observation | ~500-1,000/result |
 
-**engram**: Four tiers with different purposes.
+**SNARC**: Four tiers with different purposes.
 | Tier | Name | What | Retention |
 |------|------|------|-----------|
 | 0 | Buffer | Last 50 raw observations | Session only (FIFO) |
@@ -64,16 +64,16 @@ This is how biological memory works. You don't remember every step you took toda
 | 3 | Identity | Persistent project facts | Permanent (SQLite) |
 
 claude-mem's layers are about *token efficiency* (don't load everything at once).
-engram's tiers are about *cognitive function* (different memories serve different purposes).
+SNARC's tiers are about *cognitive function* (different memories serve different purposes).
 
 ## Context Injection
 
 **claude-mem**: Pull-only. You call MCP tools to retrieve memories. If you don't ask, nothing surfaces.
 
-**engram**: Push + pull.
+**SNARC**: Push + pull.
 - **SessionStart**: Automatically injects a briefing — recent patterns, high-salience observations, identity facts. Claude starts every session knowing what happened recently.
 - **UserPromptSubmit**: Searches for memories related to your prompt and injects them via `additionalContext`. Most prompts pass silently (no match = no injection). When there's a match, Claude sees it without you asking.
-- **PostCompact**: When Claude Code compacts the conversation, engram runs a mid-session dream cycle (consolidates observations from the first half of the session) then re-injects the now-enriched briefing. The session gets smarter as it goes — patterns discovered mid-session carry into the second half.
+- **PostCompact**: When Claude Code compacts the conversation, SNARC runs a mid-session dream cycle (consolidates observations from the first half of the session) then re-injects the now-enriched briefing. The session gets smarter as it goes — patterns discovered mid-session carry into the second half.
 - **MCP tools**: Available for explicit queries when you want to dig deeper.
 
 The UX rationale: if retrieval requires extra steps, nobody does it. Memory that isn't surfaced is memory that doesn't exist. Automatic injection makes the value visible from the first session.
@@ -82,26 +82,26 @@ The UX rationale: if retrieval requires extra steps, nobody does it. Memory that
 
 **claude-mem**: Continuous compression via agent-sdk. Every observation is AI-compressed as it's stored. "Endless Mode" (beta) adds ~95% token reduction with 60-90 second latency per tool invocation.
 
-**engram**: Heuristic consolidation at session end. No LLM calls. Three extractors run on Tier 1 observations:
+**SNARC**: Heuristic consolidation at session end. No LLM calls. Three extractors run on Tier 1 observations:
 - **Tool sequences**: Find recurring workflows (e.g., `Edit → Bash(test) → Edit` = TDD loop)
 - **Error-fix chains**: Error followed by fix on the same target within 5 observations
 - **Concept clusters**: Multiple observations grouped around the same files
 
 Patterns promote to Tier 2 with frequency and confidence scores. Next session, they appear in the briefing.
 
-The tradeoff: claude-mem's AI compression produces higher-quality summaries. engram's heuristic extraction is faster (zero latency) and captures structural patterns (workflows, chains) that text compression misses.
+The tradeoff: claude-mem's AI compression produces higher-quality summaries. SNARC's heuristic extraction is faster (zero latency) and captures structural patterns (workflows, chains) that text compression misses.
 
 ## Scope & Portability
 
 **claude-mem**: Single global database (`~/.claude-mem/claude-mem.db`). All projects share one memory. Web viewer at `localhost:37777`.
 
-**engram**: Per-directory database (`~/.engram/projects/<hash>/engram.db`). Each project gets isolated memory — SAGE patterns don't contaminate web4 work. Same pattern as Claude Code's `-c` flag.
+**SNARC**: Per-directory database (`~/.SNARC/projects/<hash>/SNARC.db`). Each project gets isolated memory — SAGE patterns don't contaminate web4 work. Same pattern as Claude Code's `-c` flag.
 
-**Fleet sync**: engram exports Tier 2 (patterns) and Tier 3 (identity) to markdown for git sync across machines. Tier 0 and 1 stay local. claude-mem has no built-in fleet sync.
+**Fleet sync**: SNARC exports Tier 2 (patterns) and Tier 3 (identity) to markdown for git sync across machines. Tier 0 and 1 stay local. claude-mem has no built-in fleet sync.
 
 ## Performance
 
-| | claude-mem | engram |
+| | claude-mem | SNARC |
 |---|---|---|
 | PostToolUse latency | ~100ms (AI compression) | <10ms (heuristic scoring) |
 | Endless Mode latency | 60-90s per tool | N/A |
@@ -119,7 +119,7 @@ The tradeoff: claude-mem's AI compression produces higher-quality summaries. eng
 - You don't mind manual retrieval (calling MCP tools)
 - You want the web viewer UI
 
-**Choose engram if:**
+**Choose SNARC if:**
 - You want attention-filtered memory (noise is forgotten)
 - You work across multiple projects (per-directory isolation)
 - You want automatic context injection (no manual retrieval)
@@ -129,8 +129,8 @@ The tradeoff: claude-mem's AI compression produces higher-quality summaries. eng
 
 ## Origin
 
-engram combines two lineages:
+SNARC combines two lineages:
 - [claude-mem](https://github.com/thedotmack/claude-mem)'s auto-capture hooks (the observation pipeline)
 - [SAGE](https://github.com/dp-web4/SAGE)'s salience-gated memory architecture (the filtering, tiering, and consolidation)
 
-The SNARC scoring concept (Surprise, Novelty, Arousal, Reward, Conflict) originates from Richard Aragon's [Transformer Sidecar](https://github.com/RichardAragon/Transformer-Sidecar-Bolt-On-Persistent-State-Space-Memory) — a selective memory system that only writes when moments are salient. SAGE adapted this into a neural scorer with learnable weights; engram adapts it further into pure heuristic TypeScript — same dimensions, no model required.
+The SNARC scoring concept (Surprise, Novelty, Arousal, Reward, Conflict) originates from Richard Aragon's [Transformer Sidecar](https://github.com/RichardAragon/Transformer-Sidecar-Bolt-On-Persistent-State-Space-Memory) — a selective memory system that only writes when moments are salient. SAGE adapted this into a neural scorer with learnable weights; SNARC adapts it further into pure heuristic TypeScript — same dimensions, no model required.

@@ -1,14 +1,14 @@
-# engram: Claude Code memory that captures what matters, forgets what doesn't
+# SNARC: Claude Code memory that captures what matters, forgets what doesn't
 
-**TL;DR**: Instead of logging every tool use and searching later, engram scores each observation on 5 salience dimensions at capture time. Low-salience stuff evicts. High-salience stuff persists. Memories decay over time. Patterns consolidate during "dream cycles."
+**TL;DR**: Instead of logging every tool use and searching later, SNARC scores each observation on 5 salience dimensions at capture time. Low-salience stuff evicts. High-salience stuff persists. Memories decay over time. Patterns consolidate during "dream cycles."
 
-**GitHub**: https://github.com/dp-web4/engram (MIT)
+**GitHub**: https://github.com/dp-web4/SNARC (MIT)
 
 ## Why another memory plugin?
 
 I looked at claude-mem, Total Recall, ContextForge, and others. They all solve the same problem the same way: capture everything, compress or search later. The result is either token-expensive injection or noisy retrieval.
 
-engram flips it: **filter at capture, not at retrieval.**
+SNARC flips it: **filter at capture, not at retrieval.**
 
 ## How it works
 
@@ -23,7 +23,7 @@ Scoring is heuristic TypeScript, <10ms, no LLM calls. Observations below thresho
 
 ## What's different
 
-| | engram | Log-everything approaches |
+| | SNARC | Log-everything approaches |
 |---|---|---|
 | Capture | Score first, store if salient | Store everything |
 | Injection | Automatic (5 hooks) | Manual (MCP calls) |
@@ -47,13 +47,13 @@ Memories aren't permanent. Patterns lose confidence daily. Below 0.1 = pruned. T
 
 ## Deep dream (optional)
 
-At session end, you can run `engram dream --deep` which sends observations to Claude and asks "what patterns are worth remembering?" — extracting semantic insights, not just mechanical tool sequences. Identity proposals from deep dream are quarantined until human-reviewed.
+At session end, you can run `SNARC dream --deep` which sends observations to Claude and asks "what patterns are worth remembering?" — extracting semantic insights, not just mechanical tool sequences. Identity proposals from deep dream are quarantined until human-reviewed.
 
 ## Install
 
 ```bash
-git clone https://github.com/dp-web4/engram.git
-cd engram && bash install.sh
+git clone https://github.com/dp-web4/SNARC.git
+cd SNARC && bash install.sh
 ```
 
 Or as a Claude Code plugin (pending marketplace acceptance).
