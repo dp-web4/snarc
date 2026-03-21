@@ -36,7 +36,7 @@ SNARC does not share data with anyone. The optional `SNARC export` command produ
 
 ## Deep Dream
 
-The optional deep dream feature (`SNARC dream --deep`) sends observation summaries to Claude via your existing `claude --print` CLI. This uses your own Claude Code authentication and is subject to Anthropic's privacy policy, not ours. Deep dream is opt-in and never runs automatically unless you set `ENGRAM_DEEP_DREAM=1`.
+The optional deep dream feature (`SNARC dream --deep`) sends observation summaries to Claude via your existing `claude --print` CLI. This uses your own Claude Code authentication and is subject to Anthropic's privacy policy, not ours. Deep dream is opt-in and never runs automatically unless you set `SNARC_DEEP_DREAM=1` (or the legacy `ENGRAM_DEEP_DREAM=1`).
 
 ## Third Parties
 

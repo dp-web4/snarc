@@ -59,7 +59,8 @@ Sends session observations to Claude via `claude --print` for semantic pattern e
 
 ```bash
 snarc dream --deep                # CLI trigger
-ENGRAM_DEEP_DREAM=1               # env var for automatic deep dream at session end
+SNARC_DEEP_DREAM=1                # env var for automatic deep dream at session end
+                                  # (ENGRAM_DEEP_DREAM also accepted for compatibility)
 ```
 
 ### Identity quarantine

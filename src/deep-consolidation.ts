@@ -11,8 +11,8 @@
  * patterns until confirmed by a human or corroborated across sessions.
  *
  * Usage:
- *   engram dream --deep           # CLI
- *   ENGRAM_DEEP_DREAM=1 on Stop   # automatic (if env var set)
+ *   snarc dream --deep            # CLI
+ *   SNARC_DEEP_DREAM=1 on Stop    # automatic (ENGRAM_DEEP_DREAM also accepted)
  */
 
 import { execSync } from 'node:child_process';

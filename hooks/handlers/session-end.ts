@@ -32,7 +32,7 @@ async function main() {
     if (result.patternsPruned > 0) parts.push(`${result.patternsPruned} pruned`);
 
     // Deep consolidation (LLM-powered, opt-in via env var)
-    if (process.env.ENGRAM_DEEP_DREAM === '1') {
+    if (process.env.SNARC_DEEP_DREAM === '1' || process.env.ENGRAM_DEEP_DREAM === '1') {
       const obs = memory.getContext(sessionId);
       if (obs.length >= 3) {
         const autoPromote = memory.getSetting('auto_promote_identity') === '1';
