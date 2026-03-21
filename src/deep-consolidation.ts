@@ -5,14 +5,13 @@
  * semantic pattern extraction. Produces higher-quality Tier 2 patterns
  * than the heuristic extractors.
  *
- * IMPORTANT: Deep dream output is INFERRED, not observed. All results
- * stay in Tier 2 as "deep_*" patterns — never auto-promoted to Tier 3.
- * Identity facts from deep dream are quarantined as "proposed_identity"
- * patterns until confirmed by a human or corroborated across sessions.
+ * IMPORTANT: Deep dream output is INFERRED, not observed. Results go to
+ * Tier 2 as "deep_*" patterns. Identity facts are auto-promoted to Tier 3
+ * by default (configurable via `snarc config auto_promote_identity 0`).
  *
  * Usage:
  *   snarc dream --deep            # CLI
- *   SNARC_DEEP_DREAM=1 on Stop    # automatic (ENGRAM_DEEP_DREAM also accepted)
+ *   Runs automatically at session end (disable: `snarc config deep_dream 0`)
  */
 
 import { execSync } from 'node:child_process';

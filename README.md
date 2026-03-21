@@ -47,39 +47,37 @@ Two modes of consolidation:
 - **Error-fix chains**: Error followed by fix on the same file within 5 observations
 - **Concept clusters**: Multiple observations grouped around the same files
 
-### Deep dream (LLM-powered, opt-in)
+### Deep dream (LLM-powered, on by default)
 
-Sends session observations to Claude via `claude --print` for semantic pattern extraction:
+At session end, SNARC sends observations to Claude via `claude --print` for semantic pattern extraction:
 
 - **Workflows**: Recurring approaches (not just tool sequences — understands intent)
 - **Error-fix chains**: Problem → solution with semantic understanding
 - **Insights**: Something learned about the codebase
 - **Decisions**: Architectural choices made during the session
-- **Identity facts**: Persistent project knowledge (quarantined by default — requires human confirmation to promote to Tier 3)
+- **Identity facts**: Persistent project knowledge, auto-promoted to Tier 3
 
 ```bash
-snarc dream --deep                # CLI trigger
-SNARC_DEEP_DREAM=1                # env var for automatic deep dream at session end
-                                  # (ENGRAM_DEEP_DREAM also accepted for compatibility)
+snarc dream --deep                # manual trigger
+snarc config deep_dream 0         # disable automatic deep dream at session end
 ```
 
-### Identity quarantine
+### Identity auto-promotion
 
-Deep dream identity facts are **quarantined by default**. They go to Tier 2 as `proposed_identity` patterns — never auto-injected into Claude's context, never promoted to Tier 3 without review.
+**On by default.** Deep dream identity facts are automatically promoted to Tier 3 (persistent identity) without human review.
+
+**Why this is on**: We're actively exploring what SNARC learns about projects through deep dream. Auto-promotion lets identity facts accumulate and influence future sessions immediately, so we can observe the feedback loop — what it gets right, what it gets wrong, and how the system self-corrects via confidence decay. This is R&D; the goal is learning, not safety theater.
+
+**The risk**: Deep dream can produce convincing but wrong identity facts. A hallucinated "this project uses Jest" will be injected into every future session until it decays or is manually removed. If you're using SNARC in a context where wrong identity facts cause real problems, turn this off.
 
 ```bash
-snarc review                             # see quarantined proposals
+snarc config auto_promote_identity 0   # quarantine: proposals need human review
+snarc review                           # see quarantined proposals
 snarc promote 42 "test_framework" "Jest"  # human confirms → Tier 3
-snarc reject 43                          # delete bad proposal
+snarc reject 43                        # delete bad proposal
 ```
 
-For those who prefer speed over safety:
-
-```bash
-snarc config auto_promote_identity 1     # per-project: deep dream identity → straight to Tier 3
-snarc config auto_promote_identity 0     # back to quarantine (default)
-export SNARC_AUTO_PROMOTE=1              # env var: all projects, same effect
-```
+All settings are per-project (stored in the SQLite database for each launch directory).
 
 ### Confidence decay
 
@@ -195,8 +193,8 @@ Stop hook (dream cycle)
   ├─→ Confidence decay (patterns -0.05/day, observations after 7 days)
   ├─→ Prune patterns below 0.1 confidence
   ├─→ Heuristic extraction → Tier 2
-  └─→ [opt-in] Deep dream via claude --print → Tier 2
-      └─→ Identity facts → quarantine (or Tier 3 if auto_promote_identity=1)
+  └─→ Deep dream via claude --print → Tier 2
+      └─→ Identity facts → Tier 3 (or quarantine if auto_promote_identity=0)
 ```
 
 ## Data

@@ -76,20 +76,28 @@ async function main() {
       const value = args[1];
 
       if (!key) {
-        // Show all settings
-        const autoPromoteDb = memory.getSetting('auto_promote_identity') || '0';
-        const autoPromoteEnv = process.env.SNARC_AUTO_PROMOTE === '1';
-        const autoPromoteEffective = autoPromoteDb === '1' || autoPromoteEnv;
+        // Show all settings — both default ON, '0' means explicitly disabled
+        const deepDream = memory.getSetting('deep_dream') !== '0';
+        const autoPromote = memory.getSetting('auto_promote_identity') !== '0';
+
         console.log('=== SNARC Settings ===');
-        console.log(`auto_promote_identity: ${autoPromoteEffective ? 'ON (dangerous)' : 'OFF (default, quarantine)'}${autoPromoteEnv ? ' [via SNARC_AUTO_PROMOTE env]' : ''}`);
-        console.log('\nUsage: snarc config <key> <value>');
-        console.log('  snarc config auto_promote_identity 1   # per-project DB setting');
-        console.log('  snarc config auto_promote_identity 0   # back to quarantine');
-        console.log('  export SNARC_AUTO_PROMOTE=1             # env var (all projects)');
+        console.log(`deep_dream:            ${deepDream ? 'ON (default)' : 'OFF'}`);
+        console.log(`auto_promote_identity: ${autoPromote ? 'ON (default)' : 'OFF (quarantine)'}`);
+        console.log('\nUsage: snarc config <key> <1|0>');
+        console.log('  snarc config deep_dream 0              # disable LLM dream at session end');
+        console.log('  snarc config auto_promote_identity 0   # quarantine identity proposals');
         break;
       }
 
-      if (key === 'auto_promote_identity') {
+      if (key === 'deep_dream') {
+        if (value === '0') {
+          memory.setSetting('deep_dream', '0');
+          console.log('deep_dream: OFF — only heuristic consolidation at session end.');
+        } else {
+          memory.setSetting('deep_dream', '1');
+          console.log('deep_dream: ON — LLM-powered consolidation will run at session end.');
+        }
+      } else if (key === 'auto_promote_identity') {
         if (value === '1') {
           memory.setSetting('auto_promote_identity', '1');
           console.log('auto_promote_identity: ON — deep dream identity facts will auto-promote to Tier 3.');
@@ -153,8 +161,7 @@ async function main() {
       const sessionId = args.find(a => !a.startsWith('-')) || 'manual-dream';
 
       if (deep) {
-        const autoPromote = memory.getSetting('auto_promote_identity') === '1'
-          || process.env.SNARC_AUTO_PROMOTE === '1';
+        const autoPromote = memory.getSetting('auto_promote_identity') !== '0';
         console.log(`Running deep dream cycle (LLM-powered)${autoPromote ? ' [auto-promote ON]' : ''}...`);
         const obs = memory.getContext(undefined, undefined, 50);
         const stmts = (memory as any).stmts;

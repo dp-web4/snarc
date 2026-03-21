@@ -31,12 +31,11 @@ async function main() {
     if (result.patternsDecayed > 0) parts.push(`${result.patternsDecayed} decayed`);
     if (result.patternsPruned > 0) parts.push(`${result.patternsPruned} pruned`);
 
-    // Deep consolidation (LLM-powered, opt-in via env var)
-    if (process.env.SNARC_DEEP_DREAM === '1' || process.env.ENGRAM_DEEP_DREAM === '1') {
+    // Deep consolidation (LLM-powered, on by default — disable with `snarc config deep_dream 0`)
+    if (memory.getSetting('deep_dream') !== '0') {
       const obs = memory.getContext(sessionId);
       if (obs.length >= 3) {
-        const autoPromote = memory.getSetting('auto_promote_identity') === '1'
-          || process.env.SNARC_AUTO_PROMOTE === '1';
+        const autoPromote = memory.getSetting('auto_promote_identity') !== '0';
         const stmts = (memory as any).stmts;
         const deep = await deepConsolidate(stmts, obs, autoPromote);
         if (deep.patternsCreated > 0) parts.push(`${deep.patternsCreated} deep patterns`);
