@@ -6,6 +6,16 @@ Captures what matters, forgets what doesn't, consolidates patterns while sleepin
 
 > Formerly "engram" — renamed to SNARC to avoid collision with an existing project. SNARC is the mechanism itself: **S**urprise, **N**ovelty, **A**rousal, **R**eward, **C**onflict.
 
+## What's new (v0.3.x)
+
+**Conversation capture** — the biggest change. Previous versions only observed tool calls: edits, commands, searches. We discovered that after hundreds of sessions, SNARC's memory was "Bash → Bash → Bash (51×)" and "focused work on file.py" — mechanics without meaning. The actual value of a session — the insights, the reframes, the decisions, the "wait, damping should not be a thing" moments — lived in the conversation and vanished at compaction. The new `PreCompact` hook reads the full conversation transcript before it's compressed and stores semantically salient turns. The mind, not just the hands.
+
+**Deep dream and auto-promote on by default.** Both were opt-in, both are now on. We're in R&D — the goal is observing what SNARC learns, not gatekeeping it. Deep dream runs at every session end. Identity facts auto-promote to Tier 3 so they influence future sessions immediately. Confidence decay corrects mistakes over time. Disable with `snarc config deep_dream 0` or `snarc config auto_promote_identity 0` if this is too aggressive for your use case.
+
+**Per-project settings via DB, not env vars.** Removed `SNARC_DEEP_DREAM` and `SNARC_AUTO_PROMOTE` environment variables. All settings are now per-project via `snarc config`. Each launch directory is isolated — what you configure for one project doesn't leak to another.
+
+**What we've learned so far**: Salience scoring on tool calls captures workflow mechanics but not intent. The heuristic extractors (tool sequences, concept clusters) are useful for accounting but shallow for memory. The real value is in conversation turns scored on semantic content — insight language, domain concepts, decisions, analogies. Deep dream operating on conversation observations produces qualitatively different patterns than deep dream on tool logs. This is the direction.
+
 ## What it does
 
 SNARC captures two things: what you **do** (tool calls) and what you **discuss** (conversation). Tool-use hooks observe every edit, command, and search. Before context compaction, the PreCompact hook reads the full conversation transcript and extracts semantically salient turns — insights, decisions, reframes, connections. Both streams are scored on 5 salience dimensions and stored if above threshold.
