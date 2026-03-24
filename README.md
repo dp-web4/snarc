@@ -8,7 +8,9 @@ Captures what matters, forgets what doesn't, consolidates patterns while sleepin
 
 ## What it does
 
-Every tool Claude uses during a session is observed, scored on 5 salience dimensions, and either forgotten (below threshold) or stored (above threshold). At session end, a "dream cycle" extracts patterns from stored observations — either mechanically (heuristic) or semantically (LLM-powered deep dream). Over time, SNARC builds a structured memory of how you work — what tools you reach for, what errors you hit, what fixes you apply.
+SNARC captures two things: what you **do** (tool calls) and what you **discuss** (conversation). Tool-use hooks observe every edit, command, and search. Before context compaction, the PreCompact hook reads the full conversation transcript and extracts semantically salient turns — insights, decisions, reframes, connections. Both streams are scored on 5 salience dimensions and stored if above threshold.
+
+At session end, a "dream cycle" extracts patterns from stored observations — either mechanically (heuristic) or semantically (LLM-powered deep dream). Over time, SNARC builds a structured memory of how you work and what you discuss — not just which tools you used, but why.
 
 Context injection is automatic. SNARC injects relevant memories at session start, after each prompt (if related memories exist), and after context compaction. You don't need to query it — it surfaces what's relevant without being asked.
 
@@ -87,8 +89,9 @@ Memories are not permanent. Patterns lose 0.05 confidence per day since last see
 
 | Hook | When | What |
 |------|------|------|
-| **SessionStart** | Session begins | Inject briefing: recent patterns, high-salience observations, identity facts |
+| **SessionStart** | Session begins | Inject briefing: recent patterns, high-salience observations (tool + conversation), identity facts |
 | **UserPromptSubmit** | Every user message | Search for related memories, inject if found (most prompts pass silently) |
+| **PreCompact** | Before context compaction | Extract semantically salient conversation turns from transcript before they're compressed |
 | **PostCompact** | After context compaction | Mid-session dream (consolidate observations so far) + re-inject enriched briefing |
 
 All injection is conservative: patterns need confidence >= 0.6, observations need salience >= 0.6, identity needs confidence >= 0.7. Quarantined proposals are never injected. Below those thresholds, SNARC stays silent.
@@ -123,7 +126,7 @@ Tier 0 and 1 stay local — they're raw and session-specific.
 /plugin install snarc
 ```
 
-This registers all 5 hooks, the MCP server, and the CLI automatically.
+This registers all 6 hooks, the MCP server, and the CLI automatically.
 
 ### From source
 
@@ -183,10 +186,23 @@ PostToolUse hook (every tool invocation)
   ├─→ salience >= threshold? → INSERT Tier 1 (SQLite)
   └─→ Silent pass-through (never blocks Claude Code)
 
+PreCompact hook (fires BEFORE context compression)
+  │
+  ├─→ Read transcript_path — full conversation JSONL
+  ├─→ Extract user + assistant turns (skip short procedural messages)
+  ├─→ Score on semantic salience:
+  │     Insight language ("the key is", "realization", "reframe")
+  │     Domain concepts (MRH, T3, trust, consciousness, etc.)
+  │     Decision language ("let's", "the plan", "going forward")
+  │     Analogies ("maps to", "like a", "same as")
+  │     Identity observations ("what it means to", "affordance")
+  ├─→ salience >= 0.3? → INSERT Tier 1 as tool_name='Conversation'
+  └─→ The MIND, not just the hands
+
 PostCompact hook (compaction = long session = lots of observations)
   │
   ├─→ Mid-session heuristic dream (<100ms) — consolidate so far
-  └─→ Re-inject enriched briefing (now includes fresh patterns)
+  └─→ Re-inject enriched briefing (now includes conversation observations)
 
 Stop hook (dream cycle)
   │
