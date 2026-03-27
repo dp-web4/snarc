@@ -20,7 +20,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { hostname } from 'node:os';
 
-const MEMBOT_URL = process.env.MEMBOT_URL || 'http://localhost:8001'; // REST bridge port (not MCP 8000)
+const MEMBOT_URL = process.env.MEMBOT_URL || 'http://localhost:8000';
 const EXPERIMENT_DIR = join(homedir(), '.snarc', 'membot');
 const EXPERIMENT_LOG = join(EXPERIMENT_DIR, 'experiment_log.jsonl');
 
@@ -57,42 +57,38 @@ function logExperiment(entry: ComparisonEntry): void {
   }
 }
 
-/**
- * Call membot via its REST bridge (plain HTTP POST, no MCP protocol).
- * The REST bridge runs on port 8001 alongside the MCP server on 8000.
- * Endpoints: /store, /search, /mount, /save, /status
- */
+// REST API route map (FastMCP 3.x uses REST endpoints, not /mcp/v1/tools/call)
+const REST_MAP: Record<string, { method: string; path: string }> = {
+  mount_cartridge: { method: 'POST', path: '/api/mount' },
+  memory_search: { method: 'POST', path: '/api/search' },
+  memory_store: { method: 'POST', path: '/api/store' },
+  save_cartridge: { method: 'POST', path: '/api/save' },
+  get_status: { method: 'GET', path: '/api/status' },
+};
+
 async function callMembot(tool: string, args: Record<string, any>): Promise<string | null> {
-  // Map MCP tool names to REST endpoints
-  const endpointMap: Record<string, string> = {
-    memory_store: '/store',
-    memory_search: '/search',
-    mount_cartridge: '/mount',
-    save_cartridge: '/save',
-    get_status: '/status',
-  };
-
-  const endpoint = endpointMap[tool];
-  if (!endpoint) return null;
-
   try {
-    const method = endpoint === '/status' ? 'GET' : 'POST';
-    const opts: RequestInit = {
-      method,
-      signal: AbortSignal.timeout(10000),
+    const route = REST_MAP[tool];
+    if (!route) return null;
+
+    const url = `${MEMBOT_URL}${route.path}`;
+    const fetchOpts: RequestInit = {
+      method: route.method,
+      signal: AbortSignal.timeout(5000),
     };
 
-    if (method === 'POST') {
-      opts.headers = { 'Content-Type': 'application/json' };
-      opts.body = JSON.stringify(args);
+    if (route.method === 'POST') {
+      fetchOpts.headers = { 'Content-Type': 'application/json' };
+      fetchOpts.body = JSON.stringify(args);
     }
 
-    const resp = await fetch(`${MEMBOT_URL}${endpoint}`, opts);
+    const resp = await fetch(url, fetchOpts);
     if (!resp.ok) return null;
 
     const data = await resp.json() as any;
-    // REST bridge returns {ok, msg, raw}
-    return data.msg || data.raw || JSON.stringify(data);
+    // REST returns {"status": "ok", "result": "..."} or structured data
+    if (data?.result !== undefined) return String(data.result);
+    return JSON.stringify(data);
   } catch {
     return null; // membot not available — silent fallback
   }
