@@ -2,7 +2,7 @@
 <!-- gitnexus:keep -->
 # GitNexus — Code Knowledge Graph
 
-Indexed as **snarc** (141 nodes, 328 edges, 18 flows). MCP tools available via `mcp__gitnexus__*`.
+Indexed as **snarc** (245 symbols, 518 relationships, 19 execution flows). MCP tools available via `mcp__gitnexus__*`.
 
 **Do not reindex.** The supervisor handles GitNexus indexing. If the index is stale, note it in SESSION_FOCUS.
 
