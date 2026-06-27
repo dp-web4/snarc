@@ -21,9 +21,23 @@ async function main() {
     const toolInput = typeof data.tool_input === 'string'
       ? data.tool_input
       : JSON.stringify(data.tool_input || '');
-    const toolOutput = typeof data.tool_result === 'string'
-      ? data.tool_result
-      : JSON.stringify(data.tool_result || '');
+    // Claude Code PostToolUse sends `tool_response` (not `tool_result`) — reading the wrong field
+    // left output_summary empty for every observation, starving reward/conflict/error_fix/arousal,
+    // which all scan output text. Prefer tool_response; keep tool_result as a back-compat fallback.
+    const toolResponse = data.tool_response ?? data.tool_result;
+    const toolOutput = typeof toolResponse === 'string'
+      ? toolResponse
+      : JSON.stringify(toolResponse ?? '');
+    // Exit code if the tool reports one (Bash etc.); fall back to error/interrupt flags.
+    let exitCode: number | undefined;
+    if (toolResponse && typeof toolResponse === 'object') {
+      const r = toolResponse as any;
+      if (typeof r.exitCode === 'number') exitCode = r.exitCode;
+      else if (typeof r.exit_code === 'number') exitCode = r.exit_code;
+      else if (typeof r.returncode === 'number') exitCode = r.returncode;
+      else if (r.interrupted === true || r.is_error === true) exitCode = 1;
+    }
+    if (exitCode === undefined && data.is_error === true) exitCode = 1;
     const cwd = data.cwd || process.cwd();
     const sessionId = data.session_id || process.env.SESSION_ID || 'unknown';
 
@@ -32,7 +46,7 @@ async function main() {
 
     const memory = new EngramMemory(getDbPath(projectRoot));
     memory.initSession(sessionId, projectRoot);
-    memory.capture(toolName, toolInput, toolOutput, cwd);
+    memory.capture(toolName, toolInput, toolOutput, cwd, exitCode);
     memory.close();
   } catch (e) {
     // Silent failure — never block Claude Code
