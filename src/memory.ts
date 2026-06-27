@@ -55,6 +55,34 @@ export class EngramMemory {
     this.buffer = new CircularBuffer(50);
     this.scorer = new SNARCScorer(this.stmts, this.buffer);
     this.stmts.initSession.run(sessionId, cwd || '');
+    this.rehydrateBuffer(sessionId);
+  }
+
+  /**
+   * Rehydrate the in-memory buffer from this session's stored observations.
+   * Each Claude Code hook runs as a FRESH process with an empty buffer, so without this SNARC
+   * scoring is half-dead: surprise is hardwired to 0.5 (no `buffer.lastToolName`) and the
+   * same-target conflict path never fires (empty `getLast`). Loading recent stored obs gives the
+   * scorer real recent history, reviving 2 of 5 dimensions. (Sub-threshold tool calls aren't in
+   * the DB, so the buffer reflects stored/salient history — an approximation, not full fidelity.)
+   * See docs/SNARC_SAGE_CROSSFEED_AUDIT_naive-opus-2026-06-27.md.
+   */
+  private rehydrateBuffer(sessionId: string): void {
+    try {
+      const recent = this.stmts.getSessionObservations.all(sessionId) as any[];
+      for (const r of recent.slice(-50)) {
+        this.buffer.push({
+          toolName: r.tool_name,
+          inputSummary: r.input_summary || '',
+          outputSummary: r.output_summary || '',
+          cwd: r.cwd || '',
+          ts: r.ts,
+          exitCode: undefined,
+        });
+      }
+    } catch {
+      // fresh session / no prior observations — buffer stays empty, scoring degrades gracefully
+    }
   }
 
   capture(toolName: string, input: string, output: string, cwd: string, exitCode?: number): CaptureResult {
@@ -70,11 +98,14 @@ export class EngramMemory {
       exitCode,
     };
 
-    // Tier 0: always goes in the buffer
-    this.buffer.push(obs);
-
-    // Score with SNARC
+    // Score with SNARC FIRST — the scorer must see the PREVIOUS observation as context
+    // (surprise's `lastToolName`, conflict's `getLast`). Pushing before scoring made
+    // `lastToolName` the CURRENT obs → a self-transition (e.g. Bash→Bash), defeating surprise.
+    // Score against prior context, THEN record. (Pairs with rehydrateBuffer for cross-process.)
     const scores = this.scorer.score(obs);
+
+    // Tier 0: now record it in the buffer
+    this.buffer.push(obs);
 
     // Tier 1: promote if above salience threshold
     const stored = scores.salience >= this.scorer.threshold;

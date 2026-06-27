@@ -44,3 +44,26 @@ embeddings. Live state CBP: 340 obs / 68 patterns / 6 identity / 102 sessions, a
    `cbp-memory` session so membot keeps growing from conversations, not just this snapshot.
 
 Audit basis: full source read of `snarc/src/` + `snarc/hooks/` + `membot/` (2026-06-26).
+
+---
+
+## UPDATE 2026-06-27 — keystone shipped: surprise + conflict revived (diagnosis refined)
+
+A naive-Opus crossfeed audit (`SNARC_SAGE_CROSSFEED_AUDIT_naive-opus-2026-06-27.md`) flagged that each hook
+runs as a fresh process with an empty buffer, claiming **surprise is "always 0.5"**. On testing, the real
+mechanism was subtler: `capture()` **pushed the obs into the buffer BEFORE scoring** (`memory.ts`), so
+`buffer.lastToolName` was the *current* tool → surprise computed a **self-transition (pinned at 0.8)**, not
+0.5, and not the intended `prev→current`. Two coupled fixes (`memory.ts`):
+1. **Score before push** — the scorer now sees the *previous* observation as context.
+2. **`rehydrateBuffer(sessionId)` in `initSession`** — loads recent stored obs so cross-process hooks have
+   real recent history (surprise + conflict's `getLast` same-target path).
+
+**Verified** (discriminating test, not just ≠0.5): repeated `Bash→Edit` surprise goes `0.80 → 0.00` as the
+transition becomes predictable (flat 0.8 under the old bug); fresh-process Edit scores 0.8 (saw prior Bash)
+not 0.5 (empty buffer). Surprise is now a live signal.
+
+**Still open**: conflict's *success/fail-transition* path uses an in-memory `recentResults` map (fresh per
+process) — needs DB persistence to revive cross-process (the same-target path is now live). Plus the
+naive-audit backlog: decay zeroes salience while search ranks `salience DESC` (old-important unfindable);
+`seen_set` never prunes (novelty saturates); `error_fix` extractor (`isSuccess` treats any non-error Edit as
+success); collapse/dedup before store (port from SAGE `experience_collector`).
