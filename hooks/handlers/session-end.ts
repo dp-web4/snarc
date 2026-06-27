@@ -9,6 +9,7 @@ import { getDbPath } from '../../src/db.js';
 import { resolveProjectRoot } from '../lib/project-root.js';
 import { deepConsolidate } from '../../src/deep-consolidation.js';
 import { membotStore, membotSave } from '../../src/membot-bridge.js';
+import { captureConversationTurns } from '../../src/conversation-capture.js';
 
 async function main() {
   let input = '';
@@ -24,10 +25,21 @@ async function main() {
     const memory = new EngramMemory(getDbPath(projectRoot));
     memory.initSession(sessionId);
 
+    const parts = [];
+
+    // Pre-exit conversation review — capture "what was said" for sessions that ended WITHOUT
+    // compacting (PreCompact only fires at compaction). Runs before consolidation so the dream
+    // cycle sees the conversation too. Dedup avoids double-storing turns PreCompact already took.
+    if (data.transcript_path) {
+      try {
+        const cr = captureConversationTurns(memory, data.transcript_path, data.cwd || process.cwd(), sessionId);
+        if (cr.captured > 0) parts.push(`${cr.captured} conversation`);
+      } catch { /* never block exit */ }
+    }
+
     // Heuristic consolidation (always runs)
     const result = memory.endSession();
 
-    const parts = [];
     if (result.patternsCreated > 0) parts.push(`${result.patternsCreated} created`);
     if (result.patternsDecayed > 0) parts.push(`${result.patternsDecayed} decayed`);
     if (result.patternsPruned > 0) parts.push(`${result.patternsPruned} pruned`);
