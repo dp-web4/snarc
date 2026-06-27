@@ -64,7 +64,10 @@ async function main() {
     const patterns = memory.getPatterns();
     let membotStored = 0;
     for (const p of patterns.slice(-10)) { // last 10 patterns from this session
-      if (p.confidence >= 0.5) {
+      // Only deep-dream consolidations go to membot's semantic layer. Shallow
+      // heuristic patterns (concept_cluster path-logging, generic tool_sequence)
+      // are session-local noise that re-emit every session and bloat the cartridge.
+      if (p.kind.startsWith('deep_')) {
         const stored = await membotStore(
           `[${p.kind}] ${p.summary}`,
           `pattern,${p.kind},conf:${p.confidence.toFixed(2)}`
