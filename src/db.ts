@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS seen_set (
   token       TEXT PRIMARY KEY,
   first_seen  TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen   TEXT NOT NULL DEFAULT (datetime('now')),
   count       INTEGER DEFAULT 1
 );
 
@@ -177,6 +178,13 @@ export function openDatabase(path?: string): Database.Database {
   // Index AFTER the column is guaranteed to exist (the SCHEMA block above runs before this ALTER on
   // a pre-migration DB, so the index can't live in SCHEMA — it would reference a missing column).
   db.exec(`CREATE INDEX IF NOT EXISTS idx_obs_base_salience ON observations(base_salience DESC)`);
+
+  // Migration: seen_set.last_seen — enables recency-windowed novelty (prune stale tokens so novelty
+  // doesn't saturate to 0 as the set grows). Backfill from first_seen.
+  try {
+    db.exec(`ALTER TABLE seen_set ADD COLUMN last_seen TEXT NOT NULL DEFAULT (datetime('now'))`);
+    db.exec(`UPDATE seen_set SET last_seen = first_seen`);
+  } catch { /* already migrated */ }
 
   // Migration: deduplicate existing patterns and add UNIQUE constraint
   try {
@@ -229,7 +237,12 @@ export function prepareStatements(db: Database.Database) {
 
     upsertSeen: db.prepare(`
       INSERT INTO seen_set (token) VALUES (?)
-      ON CONFLICT(token) DO UPDATE SET count = count + 1
+      ON CONFLICT(token) DO UPDATE SET count = count + 1, last_seen = datetime('now')
+    `),
+
+    // Prune tokens unseen for 30+ days so novelty stays live (re-emergence reads as novel).
+    pruneSeen: db.prepare(`
+      DELETE FROM seen_set WHERE last_seen < datetime('now', '-30 days')
     `),
 
     checkSeen: db.prepare(`

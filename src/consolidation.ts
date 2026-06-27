@@ -25,15 +25,17 @@ export function consolidate(
   stmts: Statements,
   sessionObs: Observation[],
   sessionId: string,
-): { patternsCreated: number; patternsDecayed: number; patternsPruned: number } {
+): { patternsCreated: number; patternsDecayed: number; patternsPruned: number; seenPruned: number } {
   // Always run decay/prune, even if no observations this session
   const decayResult = stmts.decayPatterns.run();
   const patternsDecayed = decayResult.changes;
   stmts.decayObservations.run();
   const pruneResult = stmts.prunePatterns.run();
   const patternsPruned = pruneResult.changes;
+  // Recency-window the seen-set so novelty stays a live signal (unbounded growth → novelty → 0).
+  const seenPruned = stmts.pruneSeen.run().changes;
 
-  if (sessionObs.length < 3) return { patternsCreated: 0, patternsDecayed, patternsPruned };
+  if (sessionObs.length < 3) return { patternsCreated: 0, patternsDecayed, patternsPruned, seenPruned };
 
   let created = 0;
 
@@ -46,7 +48,7 @@ export function consolidate(
   // 3. Concept clusters
   created += extractConceptClusters(stmts, sessionObs);
 
-  return { patternsCreated: created, patternsDecayed, patternsPruned };
+  return { patternsCreated: created, patternsDecayed, patternsPruned, seenPruned };
 }
 
 /**
