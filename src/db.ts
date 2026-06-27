@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS observations (
   reward          REAL NOT NULL DEFAULT 0,
   conflict        REAL NOT NULL DEFAULT 0,
   salience        REAL NOT NULL DEFAULT 0,
+  base_salience   REAL NOT NULL DEFAULT 0,
   cwd             TEXT,
   tags            TEXT
 );
@@ -165,6 +166,18 @@ export function openDatabase(path?: string): Database.Database {
     db.exec(`ALTER TABLE patterns ADD COLUMN last_seen TEXT NOT NULL DEFAULT (datetime('now'))`);
   } catch { /* column already exists */ }
 
+  // Migration: base_salience — immutable IMPORTANCE, decoupled from the decaying `salience`.
+  // decayObservations drives `salience` toward 0 for old rows, but search ranks by salience, so
+  // important old memories became unfindable. Search now ranks by base_salience (importance);
+  // `salience` stays the recency/activation signal for proactive injection. Backfill once.
+  try {
+    db.exec(`ALTER TABLE observations ADD COLUMN base_salience REAL NOT NULL DEFAULT 0`);
+    db.exec(`UPDATE observations SET base_salience = salience`);
+  } catch { /* already migrated */ }
+  // Index AFTER the column is guaranteed to exist (the SCHEMA block above runs before this ALTER on
+  // a pre-migration DB, so the index can't live in SCHEMA — it would reference a missing column).
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_obs_base_salience ON observations(base_salience DESC)`);
+
   // Migration: deduplicate existing patterns and add UNIQUE constraint
   try {
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_patterns_dedup ON patterns(kind, summary)`);
@@ -189,8 +202,8 @@ export function prepareStatements(db: Database.Database) {
   return {
     insertObservation: db.prepare(`
       INSERT INTO observations (session_id, tool_name, input_summary, output_summary,
-        surprise, novelty, arousal, reward, conflict, salience, cwd, tags)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        surprise, novelty, arousal, reward, conflict, salience, base_salience, cwd, tags)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
 
     upsertPattern: db.prepare(`
@@ -240,7 +253,7 @@ export function prepareStatements(db: Database.Database) {
       SELECT o.* FROM observations_fts f
       JOIN observations o ON o.id = f.rowid
       WHERE observations_fts MATCH ?
-      ORDER BY o.salience DESC
+      ORDER BY o.base_salience DESC, o.ts DESC
       LIMIT ?
     `),
 

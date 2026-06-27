@@ -122,6 +122,7 @@ export class EngramMemory {
         scores.reward,
         scores.conflict,
         scores.salience,
+        scores.salience, // base_salience — immutable importance; `salience` (prev col) decays, this doesn't
         cwd,
         JSON.stringify(tags),
       );
@@ -152,7 +153,7 @@ export class EngramMemory {
           tier: 1,
           id: row.id,
           summary: `[${row.tool_name}] ${row.input_summary}`,
-          salience: row.salience,
+          salience: row.base_salience ?? row.salience, // rank by importance, not decayed activation
           ts: row.ts,
         });
       }
