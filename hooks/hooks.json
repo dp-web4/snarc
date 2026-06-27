@@ -34,6 +34,17 @@
         ]
       }
     ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/handlers/pre-compact.js",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
     "PostCompact": [
       {
         "hooks": [
