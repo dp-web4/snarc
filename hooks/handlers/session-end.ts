@@ -48,7 +48,9 @@ async function main() {
     if (memory.getSetting('deep_dream') !== '0') {
       const obs = memory.getContext(sessionId);
       if (obs.length >= 3) {
-        const autoPromote = memory.getSetting('auto_promote_identity') !== '0';
+        // Default OFF → identity promotes by RE-OCCURRENCE across sessions (deep-consolidation),
+        // not by a single dream. ON ('1') restores immediate promotion (legacy, aggressive).
+        const autoPromote = memory.getSetting('auto_promote_identity') === '1';
         const stmts = (memory as any).stmts;
         const deep = await deepConsolidate(stmts, obs, autoPromote);
         if (deep.patternsCreated > 0) parts.push(`${deep.patternsCreated} deep patterns`);

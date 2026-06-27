@@ -76,16 +76,16 @@ async function main() {
       const value = args[1];
 
       if (!key) {
-        // Show all settings — both default ON, '0' means explicitly disabled
         const deepDream = memory.getSetting('deep_dream') !== '0';
-        const autoPromote = memory.getSetting('auto_promote_identity') !== '0';
+        const autoPromote = memory.getSetting('auto_promote_identity') === '1';
 
         console.log('=== SNARC Settings ===');
         console.log(`deep_dream:            ${deepDream ? 'ON (default)' : 'OFF'}`);
-        console.log(`auto_promote_identity: ${autoPromote ? 'ON (default)' : 'OFF (quarantine)'}`);
+        console.log(`auto_promote_identity: ${autoPromote ? 'ON (immediate)' : 'OFF (default — re-occurrence-gated)'}`);
         console.log('\nUsage: snarc config <key> <1|0>');
         console.log('  snarc config deep_dream 0              # disable LLM dream at session end');
-        console.log('  snarc config auto_promote_identity 0   # quarantine identity proposals');
+        console.log('  snarc config auto_promote_identity 1   # promote identity on first dream (aggressive)');
+        console.log('  (default: identity promotes only after re-occurring across 3 sessions)');
         break;
       }
 
@@ -100,11 +100,11 @@ async function main() {
       } else if (key === 'auto_promote_identity') {
         if (value === '1') {
           memory.setSetting('auto_promote_identity', '1');
-          console.log('auto_promote_identity: ON — deep dream identity facts will auto-promote to Tier 3.');
-          console.log('This is dangerous. Deep dream can produce convincing but wrong identity facts.');
+          console.log('auto_promote_identity: ON — identity facts promote on the FIRST dream (immediate).');
+          console.log('This is aggressive. Deep dream can produce convincing but wrong identity facts.');
         } else {
           memory.setSetting('auto_promote_identity', '0');
-          console.log('auto_promote_identity: OFF — identity facts quarantined for human review.');
+          console.log('auto_promote_identity: OFF (default) — identity promotes by re-occurrence across 3 sessions.');
         }
       } else {
         console.error(`Unknown setting: ${key}`);
@@ -120,7 +120,7 @@ async function main() {
       }
       console.log(`${proposals.length} proposed identity fact(s) from deep dream:\n`);
       for (const p of proposals) {
-        const summary = p.summary.replace(/^\[proposed\]\s*/, '');
+        const summary = p.summary.replace(/^\[proposed(-identity)?\]\s*/, '');
         console.log(`  #${p.id} (confidence: ${p.confidence.toFixed(2)})`);
         console.log(`    ${summary}`);
         if (p.detail) console.log(`    ${p.detail}`);
@@ -161,15 +161,15 @@ async function main() {
       const sessionId = args.find(a => !a.startsWith('-')) || 'manual-dream';
 
       if (deep) {
-        const autoPromote = memory.getSetting('auto_promote_identity') !== '0';
-        console.log(`Running deep dream cycle (LLM-powered)${autoPromote ? ' [auto-promote ON]' : ''}...`);
+        const autoPromote = memory.getSetting('auto_promote_identity') === '1';
+        console.log(`Running deep dream cycle (LLM-powered)${autoPromote ? ' [immediate-promote ON]' : ' [re-occurrence-gated]'}...`);
         const obs = memory.getContext(undefined, undefined, 50);
         const stmts = (memory as any).stmts;
         const result = await deepConsolidate(stmts, obs, autoPromote);
         const parts = [];
         if (result.patternsCreated > 0) parts.push(`${result.patternsCreated} patterns`);
-        if (result.proposedIdentity > 0) parts.push(`${result.proposedIdentity} proposed identity (quarantined)`);
-        if (result.autoPromoted > 0) parts.push(`${result.autoPromoted} identity auto-promoted to Tier 3`);
+        if (result.proposedIdentity > 0) parts.push(`${result.proposedIdentity} proposed identity (awaiting re-occurrence)`);
+        if (result.autoPromoted > 0) parts.push(`${result.autoPromoted} identity promoted to Tier 3`);
         console.log(`Deep dream complete: ${parts.join(', ') || 'nothing extracted'}`);
       } else {
         memory.initSession(sessionId);

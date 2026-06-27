@@ -138,21 +138,35 @@ export async function deepConsolidate(
     }
 
     if (p.kind === 'identity') {
-      if (autoPromote && p.confidence >= 0.8) {
-        // DANGEROUS: auto-promote to Tier 3 without human review
-        const key = p.summary.split(':')[0]?.trim() || p.summary.slice(0, 50);
-        stmts.upsertIdentity.run(key, p.detail || p.summary, 'deep-dream-auto', p.confidence);
+      // Re-occurrence-gated promotion: an identity fact earns Tier 3 by being independently
+      // re-proposed across multiple sessions (reproduced = a stable self, not a one-shot dream) —
+      // NOT by human selection and NOT by a single confident guess. deep-dream runs once per
+      // session, so the proposed_identity pattern's frequency ≈ the number of distinct sessions
+      // that re-proposed this key. (auto_promote_identity=ON lowers the bar to 1 = immediate, the
+      // legacy "dangerous" path.) Identity earned by being-the-same, not asserted or dictated.
+      const REOCCUR_THRESHOLD = autoPromote ? 1 : 3;
+      const key = p.summary.split(':')[0]?.trim() || p.summary.slice(0, 50);
+      const value = p.detail || p.summary;
+      // Accumulate under a stable per-KEY summary so re-proposals increment frequency even as the
+      // LLM's wording of the value drifts between sessions.
+      const propSummary = `[proposed-identity] ${key}`;
+      stmts.upsertPattern.run(
+        'proposed_identity',
+        propSummary,
+        value,
+        1,
+        JSON.stringify(validSourceIds),
+        p.confidence,
+      );
+      const row = stmts.getPatternByKindSummary.get('proposed_identity', propSummary) as
+        { frequency: number; confidence: number; detail: string } | undefined;
+      const freq = row?.frequency ?? 1;
+      if (freq >= REOCCUR_THRESHOLD) {
+        // Earned by reproduction → promote to Tier 3 (idempotent if already promoted).
+        const src = autoPromote ? 'deep-dream-immediate' : `reproduced-${freq}x`;
+        stmts.upsertIdentity.run(key, row?.detail || value, src, row?.confidence ?? p.confidence);
         autoPromoted++;
       } else {
-        // DEFAULT: quarantine as proposed_identity in Tier 2
-        stmts.upsertPattern.run(
-          'proposed_identity',
-          `[proposed] ${p.summary}`,
-          p.detail || '',
-          1,
-          JSON.stringify(validSourceIds),
-          p.confidence,
-        );
         proposedIdentity++;
       }
     } else {

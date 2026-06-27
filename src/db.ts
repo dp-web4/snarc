@@ -262,6 +262,10 @@ export function prepareStatements(db: Database.Database) {
       ON CONFLICT(key) DO UPDATE SET last_success = excluded.last_success, last_seen = datetime('now')
     `),
 
+    getPatternByKindSummary: db.prepare(`
+      SELECT frequency, confidence, detail FROM patterns WHERE kind = ? AND summary = ?
+    `),
+
     checkSeen: db.prepare(`
       SELECT token FROM seen_set WHERE token IN (${Array(20).fill('?').join(',')})
     `),
