@@ -54,8 +54,6 @@ const STATE_CHANGE_PATTERNS = /\b(created|Created|deleted|Deleted|modified|Modif
 export class SNARCScorer {
   private stmts: Statements;
   private buffer: CircularBuffer;
-  // Track recent results per tool+target for conflict detection
-  private recentResults = new Map<string, boolean>(); // tool:target → success?
 
   constructor(stmts: Statements, buffer: CircularBuffer) {
     this.stmts = stmts;
@@ -244,8 +242,14 @@ export class SNARCScorer {
     const output = obs.outputSummary || '';
     const currentSuccess = !ERROR_PATTERNS.test(output) && (obs.exitCode === undefined || obs.exitCode === 0);
 
-    const previousSuccess = this.recentResults.get(key);
-    this.recentResults.set(key, currentSuccess);
+    // Cross-process: read/write the prior outcome for this target in the DB. In-memory state
+    // resets each hook process, so the success→fail regression signal never fired before.
+    let previousSuccess: boolean | undefined;
+    try {
+      const row = this.stmts.getTargetOutcome.get(key) as { last_success: number } | undefined;
+      if (row) previousSuccess = row.last_success === 1;
+    } catch { /* table absent until schema runs */ }
+    try { this.stmts.upsertTargetOutcome.run(key, currentSuccess ? 1 : 0); } catch { /* ignore */ }
 
     // Conflict: previous succeeded, now fails (or vice versa)
     if (previousSuccess !== undefined && previousSuccess !== currentSuccess) {

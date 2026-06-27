@@ -145,6 +145,14 @@ CREATE TABLE IF NOT EXISTS sessions (
   obs_count   INTEGER DEFAULT 0
 );
 
+-- Per-target last outcome (persisted for cross-PROCESS conflict scoring: success→fail regressions;
+-- in-memory state resets each hook process, so this signal never fired before)
+CREATE TABLE IF NOT EXISTS target_outcomes (
+  key           TEXT PRIMARY KEY,
+  last_success  INTEGER NOT NULL,
+  last_seen     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Tool transition frequencies (persisted for cross-session surprise scoring)
 CREATE TABLE IF NOT EXISTS tool_transitions (
   from_tool   TEXT NOT NULL,
@@ -243,6 +251,15 @@ export function prepareStatements(db: Database.Database) {
     // Prune tokens unseen for 30+ days so novelty stays live (re-emergence reads as novel).
     pruneSeen: db.prepare(`
       DELETE FROM seen_set WHERE last_seen < datetime('now', '-30 days')
+    `),
+
+    getTargetOutcome: db.prepare(`
+      SELECT last_success FROM target_outcomes WHERE key = ?
+    `),
+
+    upsertTargetOutcome: db.prepare(`
+      INSERT INTO target_outcomes (key, last_success) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET last_success = excluded.last_success, last_seen = datetime('now')
     `),
 
     checkSeen: db.prepare(`
