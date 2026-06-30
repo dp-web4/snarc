@@ -36,6 +36,25 @@ export interface MemoryStats {
   bufferSize: number;
 }
 
+/**
+ * Significant tokens for retrieval-relevance matching (Sprint 0.2 calibration loop):
+ * file-path-like tokens + lowercase words >=4 chars. Used to decide whether a session acted on a
+ * surfaced memory (token overlap between the memory and the session's later observations).
+ */
+export function sigTokens(text: string): Set<string> {
+  const t = (text || '').toLowerCase();
+  const out = new Set<string>();
+  for (const m of t.matchAll(/[a-z0-9_.\-]+\/[a-z0-9_./\-]+|[a-z0-9_\-]+\.[a-z0-9]{1,5}\b/g)) out.add(m[0]);
+  for (const m of t.matchAll(/[a-z][a-z0-9_]{3,}/g)) out.add(m[0]);
+  return out;
+}
+
+const STOP_TOKENS = new Set([
+  'this', 'that', 'with', 'from', 'have', 'will', 'into', 'then', 'they', 'them', 'what',
+  'when', 'which', 'were', 'been', 'your', 'about', 'there', 'these', 'would', 'could',
+  'true', 'false', 'null', 'none', 'name', 'type', 'text', 'value', 'data', 'file', 'line',
+]);
+
 export class EngramMemory {
   private db: Database.Database;
   private stmts: Statements;
@@ -239,6 +258,7 @@ export class EngramMemory {
       lines.push('Inferred patterns (heuristic — may not be accurate):');
       for (const p of patterns.slice(0, 3)) {
         lines.push(`  - [${p.kind}] ${p.summary} (confidence: ${p.confidence.toFixed(2)})`);
+        this.logRetrieval(cwd, 'briefing', 'pattern', p.confidence, `${p.summary} ${p.detail || ''}`);
       }
     }
 
@@ -249,6 +269,9 @@ export class EngramMemory {
       lines.push('Recent observations (directly recorded):');
       for (const o of highSalience.slice(0, 3)) {
         lines.push(`  - [${o.tool_name}] ${o.input_summary.slice(0, 100)} (${o.ts})`);
+        // estimate = base_salience (immutable importance), not the decayed `salience`
+        this.logRetrieval(cwd, 'briefing', 'observation', o.base_salience ?? o.salience,
+          `${o.input_summary || ''} ${o.output_summary || ''}`);
       }
     }
 
@@ -259,6 +282,7 @@ export class EngramMemory {
       lines.push('Project facts (auto-extracted, verify if unsure):');
       for (const i of identity.slice(0, 3)) {
         lines.push(`  - ${i.key}: ${i.value}`);
+        this.logRetrieval(cwd, 'briefing', 'identity', i.confidence, `${i.key} ${i.value}`);
       }
     }
 
@@ -269,6 +293,59 @@ export class EngramMemory {
       return full.slice(0, maxTokens * 4) + '\n  ...';
     }
     return full;
+  }
+
+  /**
+   * Record that a memory was SURFACED into a session (the estimate side of the calibration loop).
+   * Outcome (relevant) is filled later by scoreRetrievals(). Never throws — instrumentation must
+   * not break briefing injection.
+   */
+  private logRetrieval(cwd: string | undefined, source: string, kind: string, estimate: number, content: string): void {
+    try {
+      const toks = [...sigTokens(content)].filter(t => !STOP_TOKENS.has(t)).slice(0, 40);
+      if (toks.length === 0) return;
+      const est = Math.max(0, Math.min(1, estimate || 0));
+      this.stmts.insertRetrieval.run(cwd || '', source, kind, est, toks.join(' '));
+    } catch { /* instrumentation must never break injection */ }
+  }
+
+  /**
+   * Fill the outcome side: a surfaced memory is "relevant" (1) if the same cwd saw later work
+   * (within 6h) that shares >=2 significant tokens with it, else 0. cwd+time-windowed so it works
+   * regardless of session-id matching across the start/end hook processes. Returns rows scored.
+   * (Outcome v1 — token-overlap is a coarse proxy for "the session acted on it"; the definition is
+   *  itself a research question, see fractal-leverage-SPRINT-0-calibration.md falsifiable stop.)
+   */
+  scoreRetrievals(): number {
+    let scored = 0;
+    try {
+      const rows = this.stmts.getUnscoredRetrievals.all() as any[];
+      for (const r of rows) {
+        const memToks = new Set<string>((r.match_key || '').split(' ').filter(Boolean));
+        if (memToks.size === 0) { this.stmts.setRetrievalRelevant.run(0, r.id); scored++; continue; }
+        const obs = this.stmts.getObsAfter.all(r.cwd || '', r.surfaced_ts, r.surfaced_ts) as any[];
+        const sessionToks = new Set<string>();
+        for (const o of obs) {
+          for (const t of sigTokens(`${o.input_summary || ''} ${o.output_summary || ''}`)) {
+            if (!STOP_TOKENS.has(t)) sessionToks.add(t);
+          }
+        }
+        let overlap = 0;
+        for (const t of memToks) if (sessionToks.has(t)) overlap++;
+        this.stmts.setRetrievalRelevant.run(overlap >= 2 ? 1 : 0, r.id);
+        scored++;
+      }
+    } catch { /* best-effort */ }
+    return scored;
+  }
+
+  /** Calibration pairs {estimate, outcome} for the harness (calib.py). */
+  getCalibrationPairs(): Array<{ estimate: number; outcome: number; source: string; item_kind: string; surfaced_ts: string }> {
+    const rows = this.stmts.getCalibrationPairs.all() as any[];
+    return rows.map(r => ({
+      estimate: r.estimate, outcome: r.relevant, source: r.source,
+      item_kind: r.item_kind, surfaced_ts: r.surfaced_ts,
+    }));
   }
 
   /**

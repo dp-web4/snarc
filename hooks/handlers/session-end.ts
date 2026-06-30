@@ -37,6 +37,11 @@ async function main() {
       } catch { /* never block exit */ }
     }
 
+    // Calibration loop (Sprint 0.2): score now-settled surfaced memories against the work the
+    // session actually did → (estimate, outcome) pairs for the fractal-leverage harness.
+    const scored = memory.scoreRetrievals();
+    if (scored > 0) parts.push(`${scored} retrieval-scored`);
+
     // Heuristic consolidation (always runs)
     const result = memory.endSession();
 

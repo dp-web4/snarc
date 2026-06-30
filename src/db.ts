@@ -160,6 +160,23 @@ CREATE TABLE IF NOT EXISTS tool_transitions (
   count       INTEGER DEFAULT 1,
   PRIMARY KEY (from_tool, to_tool)
 );
+
+-- Calibration retrieval log (fractal-leverage Sprint 0.2): close the loop snarc never had.
+-- estimate = the salience/confidence with which a memory was SURFACED into a session briefing;
+-- outcome (relevant) = whether the receiving session then did matching work (same cwd, token
+-- overlap, within a window). Feeds the shared calibration harness (ECE): does our salience
+-- actually predict usefulness? relevant: NULL = not yet scored, 1/0 = measured outcome.
+CREATE TABLE IF NOT EXISTS retrieval_log (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  surfaced_ts  TEXT NOT NULL DEFAULT (datetime('now')),
+  cwd          TEXT,
+  source       TEXT NOT NULL,        -- briefing | related
+  item_kind    TEXT NOT NULL,        -- observation | pattern | identity
+  estimate     REAL NOT NULL,        -- salience or confidence, in [0,1]
+  match_key    TEXT NOT NULL,        -- space-joined significant tokens of the surfaced content
+  relevant     INTEGER               -- NULL unscored; 1/0 outcome (did the session act on it)
+);
+CREATE INDEX IF NOT EXISTS idx_retrieval_unscored ON retrieval_log(relevant, surfaced_ts);
 `;
 
 export function openDatabase(path?: string): Database.Database {
@@ -304,6 +321,27 @@ export function prepareStatements(db: Database.Database) {
 
     getRecentObservations: db.prepare(`
       SELECT * FROM observations ORDER BY ts DESC LIMIT ?
+    `),
+
+    // --- Calibration retrieval log (Sprint 0.2) ---
+    insertRetrieval: db.prepare(`
+      INSERT INTO retrieval_log (cwd, source, item_kind, estimate, match_key)
+      VALUES (?, ?, ?, ?, ?)
+    `),
+    // Score only rows old enough that the session had time to act (>=60s settle).
+    getUnscoredRetrievals: db.prepare(`
+      SELECT id, surfaced_ts, cwd, match_key FROM retrieval_log
+      WHERE relevant IS NULL AND surfaced_ts <= datetime('now', '-60 seconds')
+    `),
+    // Outcome evidence: work done in the same cwd AFTER the memory was surfaced (6h window).
+    getObsAfter: db.prepare(`
+      SELECT input_summary, output_summary FROM observations
+      WHERE cwd = ? AND ts > ? AND ts <= datetime(?, '+6 hours')
+    `),
+    setRetrievalRelevant: db.prepare(`UPDATE retrieval_log SET relevant = ? WHERE id = ?`),
+    getCalibrationPairs: db.prepare(`
+      SELECT estimate, relevant, source, item_kind, surfaced_ts FROM retrieval_log
+      WHERE relevant IS NOT NULL ORDER BY surfaced_ts
     `),
 
     getObservationContext: db.prepare(`

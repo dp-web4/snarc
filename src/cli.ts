@@ -71,6 +71,23 @@ async function main() {
       break;
     }
 
+    case 'export-calibration': {
+      // Dump the retrieval-outcome pairs for the fractal-leverage calibration harness (calib.py).
+      // Usage: snarc export-calibration [out.jsonl]   (stdout if no path)
+      const pairs = memory.getCalibrationPairs();
+      const lines = pairs.map(p => JSON.stringify(p));
+      if (args[0]) {
+        const { writeFileSync } = await import('node:fs');
+        writeFileSync(args[0], lines.join('\n') + (lines.length ? '\n' : ''));
+        const n1 = pairs.filter(p => p.outcome === 1).length;
+        console.error(`[snarc] wrote ${pairs.length} calibration pairs (${n1} relevant) → ${args[0]}`);
+        console.error(`        measure: python3 private-context/tools/calibration/calib.py --log ${args[0]}`);
+      } else {
+        for (const l of lines) console.log(l);
+      }
+      break;
+    }
+
     case 'config': {
       const key = args[0];
       const value = args[1];
