@@ -187,9 +187,15 @@ export function openDatabase(path?: string): Database.Database {
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
 
-  // Migrations for databases created before schema updates
+  // Migrations for databases created before schema updates.
+  // NOTE: SQLite REJECTS `ALTER TABLE ... ADD COLUMN ... NOT NULL DEFAULT (datetime('now'))` — a NOT NULL
+  // column added by ALTER must have a CONSTANT default. The old form threw, the catch mis-read it as
+  // "already migrated", the column never landed, and prepareStatements then threw `no such column:
+  // last_seen` on EVERY existing db → capture silently died fleet-wide (2026-06-27→07-01). Add nullable,
+  // then backfill. (Fresh dbs still get NOT NULL via the CREATE TABLE in SCHEMA.)
   try {
-    db.exec(`ALTER TABLE patterns ADD COLUMN last_seen TEXT NOT NULL DEFAULT (datetime('now'))`);
+    db.exec(`ALTER TABLE patterns ADD COLUMN last_seen TEXT`);
+    db.exec(`UPDATE patterns SET last_seen = COALESCE(updated_at, created_at, datetime('now')) WHERE last_seen IS NULL`);
   } catch { /* column already exists */ }
 
   // Migration: base_salience — immutable IMPORTANCE, decoupled from the decaying `salience`.
@@ -207,8 +213,8 @@ export function openDatabase(path?: string): Database.Database {
   // Migration: seen_set.last_seen — enables recency-windowed novelty (prune stale tokens so novelty
   // doesn't saturate to 0 as the set grows). Backfill from first_seen.
   try {
-    db.exec(`ALTER TABLE seen_set ADD COLUMN last_seen TEXT NOT NULL DEFAULT (datetime('now'))`);
-    db.exec(`UPDATE seen_set SET last_seen = first_seen`);
+    db.exec(`ALTER TABLE seen_set ADD COLUMN last_seen TEXT`);   // nullable — see note above (NOT NULL ALTER is rejected)
+    db.exec(`UPDATE seen_set SET last_seen = first_seen WHERE last_seen IS NULL`);
   } catch { /* already migrated */ }
 
   // Migration: deduplicate existing patterns and add UNIQUE constraint

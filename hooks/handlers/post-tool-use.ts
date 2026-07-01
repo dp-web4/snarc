@@ -49,7 +49,11 @@ async function main() {
     memory.capture(toolName, toolInput, toolOutput, cwd, exitCode);
     memory.close();
   } catch (e) {
-    // Silent failure — never block Claude Code
+    // Never BLOCK Claude Code — but do NOT swallow silently. This exact silent catch hid a fleet-wide
+    // capture death for 4 days (a bad `last_seen` migration threw on every existing db). A stderr line
+    // is visible in hook debug logs without blocking; that's the difference between a 4-day and a
+    // 4-minute diagnosis.
+    process.stderr.write(`[snarc] post-tool-use capture skipped: ${(e as any)?.message ?? e}\n`);
   }
 
   process.stdout.write(JSON.stringify({ continue: true, suppressOutput: true }));
