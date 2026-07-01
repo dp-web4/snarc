@@ -22,32 +22,28 @@ async function main() {
   try {
     const data = JSON.parse(input);
     const prompt = data.prompt || data.message || '';
-
-    if (!prompt || prompt.length < 10) {
-      // Too short to meaningfully search — skip
-      process.exit(0);
-      return;
-    }
-
-    // Extract search terms: skip common words, use meaningful tokens
-    const searchQuery = extractSearchTerms(prompt);
-    if (!searchQuery) {
-      process.exit(0);
-      return;
-    }
-
-    const projectRoot = resolveProjectRoot(data.cwd || process.cwd());
+    const cwd = data.cwd || process.cwd();
+    const sessionId = data.session_id || process.env.SESSION_ID || 'unknown';
+    const projectRoot = resolveProjectRoot(cwd);
     const memory = new EngramMemory(getDbPath(projectRoot));
-    const related = memory.findRelated(searchQuery, 3);
+    memory.initSession(sessionId, projectRoot);
+
+    // CAPTURE the user's instruction — the highest-value context and the primary drift-guard: decisions
+    // live in the user's prompts, and snarc never recorded them before (this is what let "RTX is
+    // canonical" fail to stop a drift). Salient by construction. (v2 capture model, dp 2026-07-01.)
+    if (prompt && prompt.trim()) memory.captureContext('user_prompt', prompt, cwd, 0.9);
+
+    // Reactive injection — only for substantive prompts (short confirmations don't need a search).
+    const searchQuery = prompt.length >= 10 ? extractSearchTerms(prompt) : '';
+    const related = searchQuery ? memory.findRelated(searchQuery, 3) : '';
     memory.close();
 
     if (related) {
       // Inject via additionalContext — Claude sees this as part of the conversation
-      const output = JSON.stringify({ additionalContext: related });
-      process.stdout.write(output);
+      process.stdout.write(JSON.stringify({ additionalContext: related }));
     }
   } catch (e) {
-    // Silent failure
+    process.stderr.write(`[snarc] user-prompt capture skipped: ${(e as any)?.message ?? e}\n`);
   }
 
   process.exit(0);

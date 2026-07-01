@@ -41,9 +41,13 @@ const VALID_KINDS = new Set(['workflow', 'error_fix', 'insight', 'decision', 'id
 
 const PROMPT_TEMPLATE = `You are a memory consolidation agent. You are reviewing observations from a coding session and extracting durable patterns.
 
-Below are the session's observations — tool uses that scored above salience threshold. Each has a tool name, input summary, output summary, salience score, and timestamp.
+Below are the session's captured moments (v2 capture model — snarc records MEANING, not tool telemetry). Each observation's tool-name field is its KIND:
+- "user_prompt" — an INSTRUCTION or DECISION from the user (the highest-value signal: constraints, canonical choices, corrections). Prioritize these; a stated constraint like "X is canonical" or "always do Y" is durable knowledge that should survive as identity/decision.
+- "decision" — the assistant's reasoning that led to an action (the WHY).
+- "failure" — something that did NOT go to plan (a tool error / prediction miss). This is learning signal — extract as "error_fix" (what failed → what avoids it).
+- "Conversation" — discussion turns.
 
-Your job: extract patterns that would be useful in FUTURE sessions. Not a session log — durable knowledge.
+Your job: extract patterns that would be useful in FUTURE sessions — especially the user's durable constraints/decisions and the lessons from failures. Not a session log — durable knowledge that would prevent repeating a mistake or drifting off a stated decision.
 
 Respond with a JSON array of patterns. Each pattern has:
 - kind: "workflow" (recurring sequence), "error_fix" (problem→solution), "insight" (something learned), "decision" (architectural choice made), or "identity" (persistent project fact)

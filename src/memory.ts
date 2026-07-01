@@ -150,6 +150,27 @@ export class EngramMemory {
     return { salience: scores.salience, stored, scores };
   }
 
+  /**
+   * Capture SALIENT-BY-CONSTRUCTION context — a user instruction, a decision, or a failure — directly,
+   * bypassing the SNARC scorer (these are meaningful by DEFINITION, not by telemetry-scoring). The v2
+   * capture model (dp 2026-07-01): snarc records WHY (decisions / user instructions) + what FAILED (the
+   * learning signal), NOT raw tool telemetry — hestia owns the tool log. `kind`: user_prompt | decision
+   * | failure. Returns false if there's nothing to store (empty/deduped).
+   */
+  captureContext(kind: string, text: string, cwd: string, salience = 0.8): boolean {
+    const summary = summarize(text, 800);   // context carries meaning — keep more than tool telemetry (300)
+    if (!summary.trim()) return false;
+    const tags = extractTags(kind, summary, '');
+    const conflict = kind === 'failure' ? 0.9 : 0.1;   // failures are the surprise/conflict signal
+    this.stmts.insertObservation.run(
+      this.sessionId, kind, summary, '',
+      0.5, 0.7, salience, salience, conflict,   // surprise, novelty, arousal, reward, conflict (nominal)
+      salience, salience,                        // salience, base_salience — forced high (salient by construction)
+      cwd, JSON.stringify(tags),
+    );
+    return true;
+  }
+
   endSession(): { patternsCreated: number; patternsDecayed: number; patternsPruned: number } {
     // Run consolidation on this session's observations
     const sessionObs = this.stmts.getSessionObservations.all(this.sessionId) as any[];

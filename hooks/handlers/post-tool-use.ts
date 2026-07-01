@@ -41,13 +41,19 @@ async function main() {
     const cwd = data.cwd || process.cwd();
     const sessionId = data.session_id || process.env.SESSION_ID || 'unknown';
 
-    // Resolve project root — don't let subdirectory cwd split the DB
-    const projectRoot = resolveProjectRoot(cwd);
-
-    const memory = new EngramMemory(getDbPath(projectRoot));
-    memory.initSession(sessionId, projectRoot);
-    memory.capture(toolName, toolInput, toolOutput, cwd, exitCode);
-    memory.close();
+    // v2 capture model (dp 2026-07-01): snarc NO LONGER logs every tool — hestia owns the tool-use log,
+    // and 98% of the old stream was mechanical noise. PostToolUse now records ONLY FAILURES: where things
+    // didn't go according to plan. That's the learning signal (prediction error / the SNARC conflict dim).
+    const failed = exitCode !== undefined && exitCode !== 0;
+    if (failed) {
+      const projectRoot = resolveProjectRoot(cwd);
+      const memory = new EngramMemory(getDbPath(projectRoot));
+      memory.initSession(sessionId, projectRoot);
+      memory.captureContext('failure',
+        `${toolName} FAILED (exit ${exitCode}): ${toolInput.slice(0, 200)} → ${toolOutput.slice(0, 400)}`,
+        cwd, 0.85);
+      memory.close();
+    }
   } catch (e) {
     // Never BLOCK Claude Code — but do NOT swallow silently. This exact silent catch hid a fleet-wide
     // capture death for 4 days (a bad `last_seen` migration threw on every existing db). A stderr line
