@@ -22,35 +22,14 @@ import { getDbPath } from './db.js';
 // The hooks write to a DB keyed by the project cwd they receive from
 // Claude Code. The MCP server must read the same DB.
 function resolveProjectDb(): string {
-  // Explicit env var
-  if (process.env.ENGRAM_PROJECT_DIR) {
-    return getDbPath(process.env.ENGRAM_PROJECT_DIR);
-  }
-  // CLI arg
-  if (process.argv[2]) {
-    return getDbPath(process.argv[2]);
-  }
-  // Scan for most recently modified DB (most likely the active project)
-  try {
-    const { readdirSync, statSync } = require('node:fs');
-    const { join } = require('node:path');
-    const { homedir } = require('node:os');
-    const projectsDir = join(homedir(), '.engram', 'projects');
-    const entries = readdirSync(projectsDir);
-    let newest = { path: '', mtime: 0 };
-    for (const entry of entries) {
-      const dbPath = join(projectsDir, entry, 'engram.db');
-      try {
-        const stat = statSync(dbPath);
-        if (stat.mtimeMs > newest.mtime) {
-          newest = { path: dbPath, mtime: stat.mtimeMs };
-        }
-      } catch { /* no db in this dir */ }
-    }
-    if (newest.path) return newest.path;
-  } catch { /* scan failed */ }
-  // Final fallback: cwd-based
-  return getDbPath();
+  // Single resolver shared with the writers. getDbPath() honors
+  // ENGRAM_PROJECT_ROOT/DIR + walks up from its argument (or the server's cwd,
+  // which Claude Code sets to the workspace root) for an `.engram-root` marker.
+  // Reader and hooks now resolve identically. The old "newest-modified DB" scan
+  // — which read whichever unrelated project was touched last — is removed: it
+  // was a heuristic proxy for "which project is this", and it guessed wrong on
+  // any multi-session box.
+  return getDbPath(process.argv[2]);
 }
 
 const memory = new EngramMemory(resolveProjectDb());

@@ -5,11 +5,35 @@
 
 import Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 
 const ENGRAM_ROOT = join(homedir(), '.engram');
+
+/**
+ * Resolve the workspace root that keys the DB. Precedence:
+ *  1. ENGRAM_PROJECT_ROOT / ENGRAM_PROJECT_DIR env (explicit override).
+ *  2. Nearest ancestor containing an `.engram-root` marker — the EXPLICIT
+ *     workspace root that consolidates multiple repos (each has its own
+ *     CLAUDE.md/.git and would otherwise shard the store across repos).
+ *  3. The directory itself — legacy per-directory behavior, unchanged when
+ *     no marker/env is present (backward compatible: no marker = old behavior).
+ * This is the single resolver shared by the hooks (writers) and the MCP
+ * server (reader), so they can no longer disagree on which DB is "the project".
+ */
+function resolveWorkspaceDir(start: string): string {
+  const envRoot = process.env.ENGRAM_PROJECT_ROOT || process.env.ENGRAM_PROJECT_DIR;
+  if (envRoot) return envRoot;
+  let dir = start;
+  for (;;) {
+    try { if (existsSync(join(dir, '.engram-root'))) return dir; } catch { /* ignore */ }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return start;
+}
 
 /**
  * Derive a per-directory database path from the launch directory.
@@ -17,7 +41,7 @@ const ENGRAM_ROOT = join(homedir(), '.engram');
  * its own isolated context. Structure: ~/.engram/projects/<hash>/engram.db
  */
 export function getDbPath(launchDir?: string): string {
-  const dir = launchDir || process.cwd();
+  const dir = resolveWorkspaceDir(launchDir || process.cwd());
   const hash = createHash('sha256').update(dir).digest('hex').slice(0, 12);
   const projectDir = join(ENGRAM_ROOT, 'projects', hash);
   mkdirSync(projectDir, { recursive: true });
