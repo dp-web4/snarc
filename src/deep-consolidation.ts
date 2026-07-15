@@ -108,7 +108,7 @@ export async function deepConsolidate(
       },
     ).trim();
   } catch (e: any) {
-    console.error(`[snarc] Deep consolidation failed: ${e.message?.slice(0, 100)}`);
+    console.error(`[snarc] ⚠ DEEP CONSOLIDATION DEGRADED — LLM tier produced 0 patterns (spawn/timeout: ${e.message?.slice(0, 80)}). The heuristic (Tier-2) tier still runs and WILL MASK this in dream-cycle totals; if it persists, memory is running heuristic-only. See src/deep-consolidation.ts cwd-isolation note.`);
     return { patternsCreated: 0, proposedIdentity: 0, autoPromoted: 0 };
   } finally {
     try { unlinkSync(tmpFile); } catch { /* cleanup */ }
@@ -119,13 +119,13 @@ export async function deepConsolidate(
   try {
     const jsonMatch = response.match(/\[[\s\S]*\]/);
     if (!jsonMatch) {
-      console.error('[snarc] Deep consolidation: no JSON array in response');
+      console.error('[snarc] ⚠ DEEP CONSOLIDATION DEGRADED — LLM tier returned no JSON array (0 patterns; the model likely emitted prose, e.g. steered by an inherited project context). The heuristic (Tier-2) tier still runs and WILL MASK this in dream-cycle totals; if it persists, memory is running heuristic-only.');
       return { patternsCreated: 0, proposedIdentity: 0, autoPromoted: 0 };
     }
     patterns = JSON.parse(jsonMatch[0]);
     if (!Array.isArray(patterns)) throw new Error('not an array');
   } catch (e) {
-    console.error(`[snarc] Deep consolidation: failed to parse response`);
+    console.error('[snarc] ⚠ DEEP CONSOLIDATION DEGRADED — LLM response failed to parse (0 patterns). The heuristic (Tier-2) tier still runs and WILL MASK this in dream-cycle totals; if it persists, memory is running heuristic-only.');
     return { patternsCreated: 0, proposedIdentity: 0, autoPromoted: 0 };
   }
 
