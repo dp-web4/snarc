@@ -1,6 +1,6 @@
 {
   "name": "snarc",
-  "description": "SNARC — salience-gated memory for Claude Code. Scores every tool use on 5 dimensions (Surprise, Novelty, Arousal, Reward, Conflict) at capture time. Four-tier memory: buffer → observations → patterns → identity. Automatic context injection, dream cycles, confidence decay.",
+  "description": "SNARC \u2014 salience-gated memory for Claude Code. Scores every tool use on 5 dimensions (Surprise, Novelty, Arousal, Reward, Conflict) at capture time. Four-tier memory: buffer \u2192 observations \u2192 patterns \u2192 identity. Automatic context injection, dream cycles, confidence decay.",
   "version": "0.3.0",
   "author": {
     "name": "dp-web4",
@@ -8,12 +8,23 @@
   },
   "homepage": "https://github.com/dp-web4/snarc",
   "category": "productivity",
-  "keywords": ["memory", "persistence", "salience", "SNARC", "context", "attention", "dream-cycle", "SAGE"],
+  "keywords": [
+    "memory",
+    "persistence",
+    "salience",
+    "SNARC",
+    "context",
+    "attention",
+    "dream-cycle",
+    "SAGE"
+  ],
   "strict": true,
   "mcpServers": {
     "snarc": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/src/server.js"]
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/dist/src/server.js"
+      ]
     }
   },
   "hooks": {
@@ -23,7 +34,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/handlers/session-start.js",
-            "timeout": 5
+            "timeout": 15
           }
         ]
       }
@@ -34,7 +45,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/handlers/user-prompt.js",
-            "timeout": 5
+            "timeout": 15
           }
         ]
       }
@@ -46,7 +57,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/handlers/post-tool-use.js",
-            "timeout": 5
+            "timeout": 15
           }
         ]
       }
@@ -57,7 +68,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/handlers/pre-compact.js",
-            "timeout": 10
+            "timeout": 15
           }
         ]
       }
@@ -68,7 +79,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/handlers/post-compact.js",
-            "timeout": 5
+            "timeout": 15
           }
         ]
       }
