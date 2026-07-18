@@ -34,6 +34,7 @@ export interface TranscriptTurn {
 /** Minimal surface of EngramMemory this module needs — avoids a circular import. */
 export interface MemoryLike {
   capture(toolName: string, input: string, output: string, cwd: string, exitCode?: number): unknown;
+  captureContext(kind: string, text: string, cwd: string, salience?: number): boolean;
   getContext(sessionId?: string, timestamp?: string, limit?: number): any[];
 }
 
@@ -158,7 +159,13 @@ export function captureConversationTurns(
   let captured = 0;
   let skipped = 0;
   for (const turn of turns) {
-    if (scoreConversationTurn(turn.content, turn.role) < threshold) continue;
+    // The SEMANTIC score (insight/decision/analogy/identity/concept) is the right salience for
+    // conversation — a prose synthesis is salient by its CONTENT, not by tool-telemetry. Compute
+    // it once and USE it (it used to be computed only as a gate then discarded, letting the
+    // tool-oriented SNARC scorer re-flatten every Claude turn to ~0.1 while user prompts kept
+    // their 0.9 "salient by construction" floor — the role-asymmetry dp flagged 2026-07-18).
+    const semantic = scoreConversationTurn(turn.content, turn.role);
+    if (semantic < threshold) continue;
     // Store the turn labelled by SUBSTRATE ('Human'/'Claude'), not by the transcript's service-role
     // 'user'. The 'user'/'assistant' schema is a chat-API artifact that frames the human as a tool
     // operator; in a raising/collaboration frame that's reductive (the use is mutual). Name what is,
@@ -166,7 +173,10 @@ export function captureConversationTurns(
     const roleLabel = turn.role === 'user' ? 'Human' : 'Claude';
     const taggedSummary = `[${roleLabel}] ${summarizeForStorage(turn.content)}`;
     if (existing.has(taggedSummary)) { skipped++; continue; }
-    memory.capture('Conversation', taggedSummary, '', cwd);
+    // captureContext = the "salient by construction" path (bypasses the tool-telemetry SNARC
+    // scorer); store at the semantic salience so a genuine Claude synthesis reaches parity with
+    // the prompt that triggered it, without inflating routine chatter (the gate already dropped it).
+    memory.captureContext('Conversation', taggedSummary, cwd, semantic);
     membotStore(taggedSummary, 'conversation').catch(() => {});
     existing.add(taggedSummary);
     captured++;
