@@ -34,15 +34,28 @@ template).
 
 ## Remaining (the difference between "works now" and a robust living organ)
 
-- **Durability — auto-mount:** the mount is in-memory; a membot restart drops it to `cartridge:null`
-  and the bridge silently fails again. Needs cbp-memory auto-mounted in the **fleet membot startup**
-  (fleet-infra; deliberate).
+- **Durability — auto-mount: BLOCKED by coexistence (below).** CBP's membot is a local systemd user
+  service (`~/.config/systemd/user/membot.service`) started `--writable` but with NO cartridge, so a
+  restart → `cartridge:null` and the bridge silently fails. Auto-mounting cbp-memory as the startup
+  default would be a per-machine tweak — **but** the bridge writes to the *default session*, which the
+  fleet also mounts *game* cartridges on. Auto-defaulting cbp-memory would let a game mount evict it
+  AND redirect snarc's writes into the game cartridge. So auto-mount can't be done safely until
+  coexistence is resolved. **This also means the manual mount done this session is a SOFT collision
+  now: snarc writes go to cbp-memory only while no game cart is mounted on default.**
 - ~~**Durability — auto-save**~~ ✅ **DONE 2026-07-18** (`hooks/handlers/session-end.ts`): the save gate
   fired only on deep-dream patterns, so conversation writes were lost on restart when deep_dream was
   off/empty. Now `membotSave()` fires whenever ANY membot write landed (conversation OR deep-dream).
-- **Coexistence:** the fleet mounts *game-rule* cartridges on the same :8000; cbp-memory now holds the
-  default session. `multi_mount` can resolve it, but "how conversation-memory and game-memory share
-  membot" is a **fleet-architecture decision** (dp/fleet), not to be fixed by fiat.
+- **Coexistence (the gating decision):** conversation-memory (snarc bridge) and game-rule cartridges
+  both want the :8000 **default session**. The bridge's `memory_store` has no session/cartridge target —
+  it writes to whatever's mounted on default. Options for dp/fleet:
+  1. **Dedicated session** — bridge writes/reads via a fixed `session_id: "snarc"`; games keep default.
+     (Small bridge change; cleanest; per-session cartridge isolation already exists in membot.)
+  2. **Dedicated port/instance** — a second membot for conversation-memory; games keep :8000.
+     (Heavier; full isolation.)
+  3. **Multi-cart + targeted writes** — `multi_mount` both; bridge names cbp-memory on each store.
+     (Needs store-to-named-cart support.)
+  Recommendation: **(1)** — smallest change, unblocks auto-mount, and makes the organ's storage
+  independent of whatever games are doing. Not taken by fiat — it's the architecture call.
 - **Automatic contextualized recall:** the actual organ. Recall surfaced into context, not queried.
   SessionStart/UserPromptSubmit hooks inject a crude version today; surfacing the *right* memory for
   *this* moment is the real work — and the piece that transfers to SAGE.
