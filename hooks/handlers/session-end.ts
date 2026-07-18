@@ -30,9 +30,11 @@ async function main() {
     // Pre-exit conversation review — capture "what was said" for sessions that ended WITHOUT
     // compacting (PreCompact only fires at compaction). Runs before consolidation so the dream
     // cycle sees the conversation too. Dedup avoids double-storing turns PreCompact already took.
+    let convCaptured = 0;
     if (data.transcript_path) {
       try {
         const cr = captureConversationTurns(memory, data.transcript_path, data.cwd || process.cwd(), sessionId);
+        convCaptured = cr.captured;   // these dual-write to membot too — track so we persist below
         if (cr.captured > 0) parts.push(`${cr.captured} conversation`);
       } catch { /* never block exit */ }
     }
@@ -80,9 +82,14 @@ async function main() {
         if (stored) membotStored++;
       }
     }
-    if (membotStored > 0) {
-      parts.push(`${membotStored} membot-stored`);
-      await membotSave().catch(() => {}); // persist cartridge
+    if (membotStored > 0) parts.push(`${membotStored} membot-stored`);
+    // Persist the membot cartridge if ANY writes landed this session — conversation turns
+    // (captured above, which dual-write to membot) OR deep-dream patterns. The save used to fire
+    // ONLY on deep-dream patterns, so conversation writes were lost on a membot restart whenever
+    // deep_dream was off or yielded nothing. membot stores are in-memory until an explicit save.
+    if (convCaptured > 0 || membotStored > 0) {
+      const saved = await membotSave().catch(() => false);
+      if (saved) parts.push('membot-saved');
     }
 
     memory.close();

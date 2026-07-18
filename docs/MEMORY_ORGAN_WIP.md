@@ -13,7 +13,7 @@ template).
 | Piece | Role | State |
 |---|---|---|
 | **snarc** | capture + keyword (FTS5) recall | ✅ working; salience fixed 2026-07-18 |
-| **membot** | associative / embedding (+hamming) recall | ✅ WIRED 2026-07-18; ⚠ not yet durable |
+| **membot** | associative / embedding (+hamming) recall | ✅ WIRED 2026-07-18; auto-save ✅, auto-mount ⏳ |
 | **unified recall** | one call over both (keyword + associative) | ⏳ bridge has dual-search scaffolding; not surfaced as one organ |
 | **automatic contextualized recall** | right memory surfaced *unbidden* | ⏳ NOT DONE — the real "organ"; hooks are a crude version |
 | **→ SAGE** | same pattern as a woven memory IRP | ⏳ not started (the payoff) |
@@ -37,8 +37,9 @@ template).
 - **Durability — auto-mount:** the mount is in-memory; a membot restart drops it to `cartridge:null`
   and the bridge silently fails again. Needs cbp-memory auto-mounted in the **fleet membot startup**
   (fleet-infra; deliberate).
-- **Durability — auto-save:** bridge writes accumulate in-memory; only an explicit `/api/save` persists
-  them. Needs auto-save (session-end is the natural trigger; **snarc side = ours**, low-risk — NEXT).
+- ~~**Durability — auto-save**~~ ✅ **DONE 2026-07-18** (`hooks/handlers/session-end.ts`): the save gate
+  fired only on deep-dream patterns, so conversation writes were lost on restart when deep_dream was
+  off/empty. Now `membotSave()` fires whenever ANY membot write landed (conversation OR deep-dream).
 - **Coexistence:** the fleet mounts *game-rule* cartridges on the same :8000; cbp-memory now holds the
   default session. `multi_mount` can resolve it, but "how conversation-memory and game-memory share
   membot" is a **fleet-architecture decision** (dp/fleet), not to be fixed by fiat.
