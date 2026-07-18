@@ -45,17 +45,22 @@ template).
 - ~~**Durability — auto-save**~~ ✅ **DONE 2026-07-18** (`hooks/handlers/session-end.ts`): the save gate
   fired only on deep-dream patterns, so conversation writes were lost on restart when deep_dream was
   off/empty. Now `membotSave()` fires whenever ANY membot write landed (conversation OR deep-dream).
-- **Coexistence (the gating decision):** conversation-memory (snarc bridge) and game-rule cartridges
-  both want the :8000 **default session**. The bridge's `memory_store` has no session/cartridge target —
-  it writes to whatever's mounted on default. Options for dp/fleet:
-  1. **Dedicated session** — bridge writes/reads via a fixed `session_id: "snarc"`; games keep default.
-     (Small bridge change; cleanest; per-session cartridge isolation already exists in membot.)
-  2. **Dedicated port/instance** — a second membot for conversation-memory; games keep :8000.
-     (Heavier; full isolation.)
-  3. **Multi-cart + targeted writes** — `multi_mount` both; bridge names cbp-memory on each store.
-     (Needs store-to-named-cart support.)
-  Recommendation: **(1)** — smallest change, unblocks auto-mount, and makes the organ's storage
-  independent of whatever games are doing. Not taken by fiat — it's the architecture call.
+- **~~Coexistence~~ → REFRAMED (dp, 2026-07-18): a cartridge is a Web4 ORACLE ENTITY, not a mount to
+  fight over.** The session-mount framing (dedicated session / port / multi-cart) was the wrong level.
+  A membot cartridge has its own **LCT identity, MRH (relevance horizon), contextualized T3/V3 trust,
+  and discoverability**. So the question is not "which session mounts what" — it is **how an agent, per
+  its role and context, gets a PORTFOLIO of oracles it may consult (read) and write (contribute) to.**
+  - **Assignment**: the role's law carries an oracle consult-set + write-set — the *memory dimension of
+    the same role-scope* the path-scope gate governs for directories. Read-membrane + write-membrane,
+    role-bound, witnessed (write matters more: a write changes what everyone who consults that oracle
+    receives → foreign/low-trust roles get a sandboxed write-oracle).
+  - **Discovery**: `find_oracles(MRH) → relevant oracles + contextual trust` — the natural next verb
+    after the fleet's existing membot member-discovery / `find_members` / walk-associate work.
+  - **Automatic contextualized recall = this**: the role's assigned+discovered oracles surface relevant
+    memory unbidden, MRH-scoped and T3/V3-weighted. The organ's "contextualization" IS Web4.
+  This unifies membot + Web4 (oracle entity) + the role-launcher (oracle-scope alongside path-scope) +
+  the memory-organ. It also reframes the Andy note's session-model question. Design still being shaped
+  with dp; NOT a mount tweak.
 - **Automatic contextualized recall:** the actual organ. Recall surfaced into context, not queried.
   SessionStart/UserPromptSubmit hooks inject a crude version today; surfacing the *right* memory for
   *this* moment is the real work — and the piece that transfers to SAGE.
