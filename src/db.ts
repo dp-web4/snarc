@@ -338,6 +338,18 @@ export function prepareStatements(db: Database.Database) {
       LIMIT ?
     `),
 
+    // Structural facet (gitnexus-distilled symbols): its own retrieval lane,
+    // ranked by FTS RELEVANCE (bm25), not salience — structural facts carry
+    // modest, uniform salience, so a salience sort would silence them entirely
+    // in the pooled query (finding 2026-07-18: recall must be facet-aware).
+    searchStructural: db.prepare(`
+      SELECT o.* FROM observations_fts f
+      JOIN observations o ON o.id = f.rowid
+      WHERE observations_fts MATCH ? AND o.tool_name = 'structural'
+      ORDER BY bm25(observations_fts) ASC
+      LIMIT ?
+    `),
+
     searchPatterns: db.prepare(`
       SELECT p.* FROM patterns_fts f
       JOIN patterns p ON p.id = f.rowid

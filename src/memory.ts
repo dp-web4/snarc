@@ -375,20 +375,38 @@ export class EngramMemory {
    * or confidence >= 0.5 (Tier 2). Labels provenance explicitly.
    */
   findRelated(query: string, limit = 3): string {
-    const results = this.search(query, limit * 2) // overfetch, then filter
+    // Facet-aware recall (finding 2026-07-18): a single salience-ranked pooled
+    // query silences the low-salience structural facet. So the structural facet
+    // (gitnexus-distilled symbols) gets its OWN reserved lane, ranked by FTS
+    // relevance, fired only on code-ish queries — while the episodic/pattern lane
+    // keeps its salience ranking. One recall, facets with guaranteed voices.
+    const episodic = this.search(query, limit * 2) // overfetch, then filter
       .filter(r =>
-        (r.tier === 1 && (r.salience || 0) >= 0.3) ||
-        (r.tier === 2 && (r.confidence || 0) >= 0.5 && r.kind !== 'proposed_identity')
+        !r.summary.startsWith('[structural]') && // structural has its own lane below
+        ((r.tier === 1 && (r.salience || 0) >= 0.3) ||
+          (r.tier === 2 && (r.confidence || 0) >= 0.5 && r.kind !== 'proposed_identity'))
       )
       .slice(0, limit);
-    if (results.length === 0) return '';
+    const structural = looksLikeCode(query) ? this.searchStructural(query, 2) : [];
+    if (episodic.length === 0 && structural.length === 0) return '';
 
-    const lines = ['Related SNARC memories (verify before relying on these):'];
-    for (const r of results) {
+    const lines = ['Related memory (verify before relying on these):'];
+    for (const s of structural) lines.push(`  - [structural] ${s}`);
+    for (const r of episodic) {
       const provenance = r.tier === 1 ? 'observed' : 'inferred';
       lines.push(`  - [${provenance}${r.kind ? ` ${r.kind}` : ''}] ${r.summary}`);
     }
     return lines.join('\n');
+  }
+
+  /** Structural-facet retrieval — gitnexus-distilled symbols, ranked by relevance. */
+  searchStructural(query: string, limit = 2): string[] {
+    try {
+      const rows = this.stmts.searchStructural.all(query, limit) as any[];
+      return rows.map(r => (r.input_summary || '').slice(0, 140));
+    } catch {
+      return []; // FTS syntax error or no structural rows — degrade silently
+    }
   }
 
   getSetting(key: string): string | undefined {
@@ -432,6 +450,15 @@ function summarize(text: string, maxLen: number): string {
   text = text.replace(/\s+/g, ' ').trim();
   if (text.length <= maxLen) return text;
   return text.slice(0, maxLen - 3) + '...';
+}
+
+/**
+ * Does the recall query look like it's about code? Gates the structural facet
+ * so non-code prompts stay clean. Queries arrive lowercased (extractSearchTerms),
+ * so camelCase is lost — we key on snake_case, file extensions, and code words.
+ */
+function looksLikeCode(q: string): boolean {
+  return /[a-z0-9]+_[a-z0-9]+|\.(ts|tsx|js|mjs|py|rs|go|java|rb|c|cpp|h|hpp)\b|\b(function|class|method|symbol|callers?|serialize|deserialize|import|module|refactor|impl)\b/.test(q);
 }
 
 /** Extract tags from tool usage for search */
