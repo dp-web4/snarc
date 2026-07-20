@@ -21,6 +21,12 @@ import { homedir } from 'node:os';
 import { hostname } from 'node:os';
 
 const MEMBOT_URL = process.env.MEMBOT_URL || 'http://localhost:8000';
+// Conversation-memory rides its OWN membot session so game-rule carts (mounted on
+// the default session) don't collide with it (Waving Cat rec, 2026-07-19: option 1 —
+// session_id namespacing now; migrate to cart_name when membot save-to-cart ships).
+// Applied coherently to mount + store + search so they always agree on the session
+// (if membot honors session_id → dedicated namespace; if not → no-op, no regression).
+const SNARC_SESSION = process.env.SNARC_MEMBOT_SESSION || 'snarc';
 const EXPERIMENT_DIR = join(homedir(), '.snarc', 'membot');
 const EXPERIMENT_LOG = join(EXPERIMENT_DIR, 'experiment_log.jsonl');
 
@@ -121,7 +127,7 @@ function parseMembotSearchResults(raw: string): MembotResult[] {
  */
 export async function membotStore(content: string, tags: string = ''): Promise<boolean> {
   const t0 = Date.now();
-  const result = await callMembot('memory_store', { content, tags });
+  const result = await callMembot('memory_store', { content, tags, session_id: SNARC_SESSION });
   const elapsed = Date.now() - t0;
 
   const stored = result !== null && result.includes('Stored');
@@ -148,7 +154,7 @@ export async function membotDualSearch(
   snarcTimeMs: number,
 ): Promise<MembotResult[]> {
   const t0 = Date.now();
-  const raw = await callMembot('memory_search', { query, top_k: 5 });
+  const raw = await callMembot('memory_search', { query, top_k: 5, session_id: SNARC_SESSION });
   const membotTimeMs = Date.now() - t0;
 
   if (!raw) {
@@ -212,7 +218,7 @@ export async function membotDualSearch(
  */
 export async function membotEnsureMounted(projectHash: string): Promise<boolean> {
   const name = `snarc-${projectHash}`;
-  const result = await callMembot('mount_cartridge', { name });
+  const result = await callMembot('mount_cartridge', { name, session_id: SNARC_SESSION });
   if (result && result.includes('Mounted')) return true;
   if (result && result.includes('not found')) {
     // No cartridge yet — that's fine, will be created on first store
