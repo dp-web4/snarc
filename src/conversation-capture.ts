@@ -51,7 +51,52 @@ export function extractTextContent(entry: any): string {
   return '';
 }
 
-export function parseTranscript(transcriptPath: string): TranscriptTurn[] {
+/**
+ * A transcript-format recognizer: given one parsed JSONL entry, return a
+ * {role, content} turn, or null if it doesn't recognize this line's shape.
+ * Registering a recognizer is how a non-Claude harness plugs into snarc capture
+ * without forking parseTranscript (Kimi's integration note #3, 2026-07-21: don't
+ * make every non-Claude agent re-implement the parser).
+ */
+export type TurnRecognizer = (entry: any) => TranscriptTurn | null;
+
+/** Claude Code transcripts: type:'user'/'assistant' (or role); content under .message/.content. */
+export const claudeRecognizer: TurnRecognizer = (entry) => {
+  if (entry.type === 'user' || entry.type === 'human' || entry.role === 'user') {
+    const content = extractTextContent(entry);
+    if (content && content.length > 20) return { role: 'user', content, ts: entry.timestamp || entry.ts };
+  } else if (entry.type === 'assistant' || entry.role === 'assistant') {
+    const content = extractTextContent(entry);
+    if (content && content.length > 50) return { role: 'assistant', content, ts: entry.timestamp || entry.ts };
+  }
+  return null;
+};
+
+/**
+ * Kimi Code wire.jsonl: assistant text lives in
+ * type:'context.append_loop_event' → event.type:'content.part' → event.part{type:'text',text}.
+ * Ported verbatim from Kimi's own verified reference (shared-context/kimi-memory/lib/
+ * kimi-transcript.js) so the shape is confirmed, not guessed. User prompts (turn.prompt) are
+ * not recognized here yet — a known gap, left rather than guessed at (guessing = silent no-match).
+ */
+export const kimiRecognizer: TurnRecognizer = (entry) => {
+  if (entry.type === 'context.append_loop_event') {
+    const ev = entry.event;
+    if (ev?.type === 'content.part' && ev.part?.type === 'text' && ev.part.text) {
+      const content = String(ev.part.text).trim();
+      if (content && content.length > 50) return { role: 'assistant', content, ts: entry.timestamp || entry.ts };
+    }
+  }
+  return null;
+};
+
+/** Recognizers tried in order, first match wins per line. Claude first (the common case). */
+export const TURN_RECOGNIZERS: TurnRecognizer[] = [claudeRecognizer, kimiRecognizer];
+
+export function parseTranscript(
+  transcriptPath: string,
+  recognizers: TurnRecognizer[] = TURN_RECOGNIZERS,
+): TranscriptTurn[] {
   const turns: TranscriptTurn[] = [];
   let buf: Buffer;
   try {
@@ -70,18 +115,11 @@ export function parseTranscript(transcriptPath: string): TranscriptTurn[] {
     if (nl > start) {
       try {
         const entry = JSON.parse(buf.toString('utf-8', start, nl));
-        // Claude Code transcripts use type:'user' (top-level role is null; content under .message).
-        // The original 'human' check matched nothing real, silently dropping ALL user turns.
-        if (entry.type === 'user' || entry.type === 'human' || entry.role === 'user') {
-          const content = extractTextContent(entry);
-          if (content && content.length > 20) {
-            turns.push({ role: 'user', content, ts: entry.timestamp || entry.ts });
-          }
-        } else if (entry.type === 'assistant' || entry.role === 'assistant') {
-          const content = extractTextContent(entry);
-          if (content && content.length > 50) {
-            turns.push({ role: 'assistant', content, ts: entry.timestamp || entry.ts });
-          }
+        // Try each format recognizer; first match wins per line. Claude and Kimi
+        // shapes are both handled without forking this loop (see TURN_RECOGNIZERS).
+        for (const recognize of recognizers) {
+          const turn = recognize(entry);
+          if (turn) { turns.push(turn); break; }
         }
       } catch {
         // skip malformed / over-long line
