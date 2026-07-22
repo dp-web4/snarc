@@ -2,8 +2,10 @@
  * Resolve the project root from any subdirectory.
  *
  * Uses ENGRAM_PROJECT_ROOT env var if set (most reliable).
- * Otherwise walks up from `startDir` looking for CLAUDE.md, then .git.
- * Stops walking at the first .git to avoid crossing into parent repos.
+ * Otherwise walks up from `startDir` looking for a standing-law marker
+ * (CLAUDE.md or AGENTS.md — the latter is what non-Claude harnesses like Kimi
+ * use), then .git. Stops walking at the first .git to avoid crossing into
+ * parent repos.
  *
  * This prevents subdirectory cwd values (from Bash tool cd) from
  * splitting observations across multiple engram databases.
@@ -21,10 +23,13 @@ export function resolveProjectRoot(startDir: string): string {
   let dir = resolve(startDir);
   const root = '/';
 
-  // First pass: look for CLAUDE.md (strongest workspace indicator)
+  // First pass: look for a standing-law marker (strongest workspace indicator).
+  // CLAUDE.md for Claude Code; AGENTS.md for Kimi and other non-Claude harnesses
+  // that use it as their standing-law file, so their observations shard the same
+  // way rather than falling through to the .git fallback.
   let search = dir;
   while (search !== root) {
-    if (existsSync(join(search, 'CLAUDE.md'))) {
+    if (existsSync(join(search, 'CLAUDE.md')) || existsSync(join(search, 'AGENTS.md'))) {
       return search;
     }
     const parent = dirname(search);
