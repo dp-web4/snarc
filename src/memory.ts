@@ -8,6 +8,10 @@ import { openDatabase, prepareStatements, type Statements } from './db.js';
 import { CircularBuffer, type RawObservation } from './buffer.js';
 import { SNARCScorer, type SNARCScores } from './snarc.js';
 import { consolidate } from './consolidation.js';
+import { createHash } from 'node:crypto';
+
+/** Stable content hash for dedup — backs the observations.content_hash column (Kimi #4). */
+const contentHash = (s: string): string => createHash('sha256').update(s).digest('hex');
 
 export interface CaptureResult {
   salience: number;
@@ -144,6 +148,7 @@ export class EngramMemory {
         scores.salience, // base_salience — immutable importance; `salience` (prev col) decays, this doesn't
         cwd,
         JSON.stringify(tags),
+        contentHash(toolName + '\x00' + inputSummary + '\x00' + outputSummary),
       );
     }
 
@@ -160,6 +165,13 @@ export class EngramMemory {
   captureContext(kind: string, text: string, cwd: string, salience = 0.8): boolean {
     const summary = summarize(text, 800);   // context carries meaning — keep more than tool telemetry (300)
     if (!summary.trim()) return false;
+    // Idempotent re-capture: if this exact context was already stored THIS session, no-op.
+    // Fixes duplicate observations under replayed SessionEnd (Kimi #4, 2026-07-21): the STORE is
+    // the dedup authority, keyed on the stored form's hash, so it's robust to the caller's
+    // pre-summarize key differing from the stored value (the root cause). Scoped to session, not
+    // a global UNIQUE — that would drop legitimately-repeated observations on the tool path.
+    const hash = contentHash(kind + '\x00' + summary);
+    if (this.stmts.existsContentHash.get(this.sessionId, hash)) return false;
     const tags = extractTags(kind, summary, '');
     const conflict = kind === 'failure' ? 0.9 : 0.1;   // failures are the surprise/conflict signal
     this.stmts.insertObservation.run(
@@ -167,6 +179,7 @@ export class EngramMemory {
       0.5, 0.7, salience, salience, conflict,   // surprise, novelty, arousal, reward, conflict (nominal)
       salience, salience,                        // salience, base_salience — forced high (salient by construction)
       cwd, JSON.stringify(tags),
+      hash,
     );
     return true;
   }

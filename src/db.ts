@@ -73,7 +73,8 @@ CREATE TABLE IF NOT EXISTS observations (
   salience        REAL NOT NULL DEFAULT 0,
   base_salience   REAL NOT NULL DEFAULT 0,
   cwd             TEXT,
-  tags            TEXT
+  tags            TEXT,
+  content_hash    TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_obs_session ON observations(session_id);
@@ -234,6 +235,15 @@ export function openDatabase(path?: string): Database.Database {
   // a pre-migration DB, so the index can't live in SCHEMA — it would reference a missing column).
   db.exec(`CREATE INDEX IF NOT EXISTS idx_obs_base_salience ON observations(base_salience DESC)`);
 
+  // Migration: content_hash — enables true no-op re-capture of identical context (Kimi #4,
+  // 2026-07-21). Nullable ADD COLUMN (NOT NULL ALTER is rejected — see the note above). Dedup is
+  // enforced in captureContext, scoped to session, NOT via a global UNIQUE index (that would drop
+  // legitimately-repeated observations on the tool path). Existing rows keep NULL — the guard only
+  // applies to new inserts, so no backfill is needed.
+  try {
+    db.exec(`ALTER TABLE observations ADD COLUMN content_hash TEXT`);
+  } catch { /* already migrated */ }
+
   // Migration: seen_set.last_seen — enables recency-windowed novelty (prune stale tokens so novelty
   // doesn't saturate to 0 as the set grows). Backfill from first_seen.
   try {
@@ -265,8 +275,13 @@ export function prepareStatements(db: Database.Database) {
   return {
     insertObservation: db.prepare(`
       INSERT INTO observations (session_id, tool_name, input_summary, output_summary,
-        surprise, novelty, arousal, reward, conflict, salience, base_salience, cwd, tags)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        surprise, novelty, arousal, reward, conflict, salience, base_salience, cwd, tags,
+        content_hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `),
+
+    existsContentHash: db.prepare(`
+      SELECT 1 FROM observations WHERE session_id = ? AND content_hash = ? LIMIT 1
     `),
 
     upsertPattern: db.prepare(`
