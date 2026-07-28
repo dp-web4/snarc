@@ -27,6 +27,30 @@ const MEMBOT_URL = process.env.MEMBOT_URL || 'http://localhost:8000';
 // Applied coherently to mount + store + search so they always agree on the session
 // (if membot honors session_id → dedicated namespace; if not → no-op, no regression).
 const SNARC_SESSION = process.env.SNARC_MEMBOT_SESSION || 'snarc';
+/**
+ * Relevance floor used to CLASSIFY a search, never to filter one.
+ *
+ * `/api/search` ranks and returns `min(top_k, n_rows)` — the only guards are
+ * `base_score < 0.05` and `final_score < 0.1` (membot_server.py:1673,:1729), and
+ * both sit roughly five times below where irrelevant text actually scores. Thor
+ * measured the live distribution on a 240-row cart (2026-07-28): 0.7974 for a
+ * real match, 0.5808 for a deliberate decoy corpus, 0.5520 for pure nonsense,
+ * and 0.5877 for the query "the". So the server's floors cannot fire, and an
+ * `empty` result set is unreachable on this call site — which made `empty`, the
+ * one outcome defined to mean "a genuine negative trial", impossible to log.
+ *
+ * 0.65 splits Thor's real/decoy pair with margin on both sides. That is n=1 box
+ * on the ollama `nomic-embed-text` branch; HUB runs SentenceTransformer
+ * `nomic-embed-text-v1.5`, and the two branches' vectors are not comparable, so
+ * treat this as a placeholder to be re-derived per branch, not a fleet constant.
+ * Every searched row logs `membot_score_floor` and `membot_top_score`, so any
+ * later analysis can re-cut the same rows at a different threshold without
+ * re-running the experiment.
+ *
+ * Deliberately NOT applied to the returned results: a wrong default here must be
+ * able to mislabel a row, never to withhold context from the briefing.
+ */
+const MEMBOT_MIN_SCORE = Number(process.env.SNARC_MEMBOT_MIN_SCORE ?? 0.65);
 const EXPERIMENT_DIR = join(homedir(), '.snarc', 'membot');
 const EXPERIMENT_LOG = join(EXPERIMENT_DIR, 'experiment_log.jsonl');
 
@@ -55,8 +79,8 @@ type MembotOutcome =
   | 'no_route'      // tool has no REST mapping; the call never left this process
   | 'not_mounted'   // server answered, but there is no cartridge behind it
   | 'server_error'  // server answered with an explicit error payload
-  | 'empty'         // server searched a real cartridge and matched nothing
-  | 'ok';           // stored, or returned hits
+  | 'empty'         // server searched a real cartridge, nothing cleared the floor
+  | 'ok';           // stored, or returned a hit above the floor
 
 interface ComparisonEntry {
   ts: string;
@@ -84,6 +108,31 @@ interface ComparisonEntry {
    * and then dropped it on the floor, logging reachability in its place.
    */
   membot_stored?: boolean;
+  /**
+   * The strict signal, and the reason this field exists at all.
+   *
+   * `membot_unique` is `membotResults.length - overlap_count`, where the overlap
+   * test is an 80-char lowercased-prefix substring match that essentially never
+   * fires. Before the parser fix it was a constant 0 that could not rise; after
+   * it, against any mounted cart of >= top_k rows, it is a constant 5 that
+   * cannot fall. Both are compatible with every possible retrieval quality, so
+   * neither can answer the question the A/B was built to ask (Thor, 2026-07-28).
+   *
+   * `score` already discriminates — 0.7974 real vs 0.5520 nonsense on the same
+   * cart — and `extractMembotResults` already carries it into `membot_results`.
+   * It was simply never the number anyone would read. This is that number,
+   * hoisted to the top level: the highest-scoring hit membot returned.
+   * Absent when the server returned no rows at all.
+   */
+  membot_top_score?: number;
+  /** Results at or above `membot_score_floor`. Unlike `membot_unique`, free to move. */
+  membot_relevant_count?: number;
+  /**
+   * The floor in effect for this row, so a later analyst can re-cut the same
+   * rows at a different threshold instead of re-running four months of trials.
+   * Present only when the server actually searched a cartridge.
+   */
+  membot_score_floor?: number;
   machine: string;
 }
 
@@ -303,6 +352,14 @@ export async function membotDualSearch(
     }
   }
 
+  // The server ranks and returns min(top_k, n_rows) with no usable relevance
+  // guard, so "the array is non-empty" says only that the cartridge had rows.
+  // Score is what separates a hit from a shrug; classify on that instead.
+  const topScore = membotResults.length
+    ? Math.max(...membotResults.map(r => r.score))
+    : undefined;
+  const relevantCount = membotResults.filter(r => r.score >= MEMBOT_MIN_SCORE).length;
+
   logExperiment({
     ts: new Date().toISOString(),
     event: 'dual_search',
@@ -312,12 +369,15 @@ export async function membotDualSearch(
     overlap_count: overlapCount,
     snarc_unique: snarcResults.length - overlapCount,
     membot_unique: membotResults.length - overlapCount,
+    ...(topScore !== undefined ? { membot_top_score: topScore } : {}),
+    membot_relevant_count: relevantCount,
+    membot_score_floor: MEMBOT_MIN_SCORE,
     snarc_time_ms: snarcTimeMs,
     membot_time_ms: membotTimeMs,
     membot_available: true,
-    // A mounted cartridge that genuinely matched nothing is a real negative
-    // trial and counts; the rows above are not trials at all.
-    membot_outcome: membotResults.length > 0 ? 'ok' : 'empty',
+    // A mounted cartridge that searched and surfaced nothing relevant is a real
+    // negative trial and counts; the rows above are not trials at all.
+    membot_outcome: relevantCount > 0 ? 'ok' : 'empty',
     machine: hostname(),
   });
 

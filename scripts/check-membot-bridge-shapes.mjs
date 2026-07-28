@@ -28,16 +28,30 @@ let mode = 'healthy';
 const server = createServer((req, res) => {
   let payload;
   if (req.url === '/api/search') {
-    payload = mode === 'healthy'
-      ? { status: 'ok', elapsed_ms: 71, results: [
-          { text: 'self-witnessing: observation creates reality', full_text: '...', score: 0.7161, tags: '', index: 3 },
-          { text: 'the CRT analogy: perception depends on timing', full_text: '...', score: 0.6774, tags: '', index: 5 },
-        ] }
-      : { status: 'ok', results: [], error: 'No cartridge mounted' };
+    if (mode === 'healthy') {
+      payload = { status: 'ok', elapsed_ms: 71, results: [
+        { text: 'self-witnessing: observation creates reality', full_text: '...', score: 0.7161, tags: '', index: 3 },
+        { text: 'the CRT analogy: perception depends on timing', full_text: '...', score: 0.6774, tags: '', index: 5 },
+      ] };
+    } else if (mode === 'irrelevant') {
+      // A real mounted cartridge answering a query it has nothing for. The
+      // server has no usable relevance guard, so it fills top_k regardless:
+      // scores are Thor's live decoy/nonsense measurements (2026-07-28).
+      payload = { status: 'ok', elapsed_ms: 64, results: [
+        { text: 'cricket knitting and the Hanseatic League', full_text: '...', score: 0.5877, tags: '', index: 11 },
+        { text: 'a decoy passage with no bearing on the query', full_text: '...', score: 0.5808, tags: '', index: 12 },
+        { text: 'unrelated corpus filler', full_text: '...', score: 0.5652, tags: '', index: 13 },
+        { text: 'zzqx wubble frobnicate blorptrons', full_text: '...', score: 0.5520, tags: '', index: 14 },
+        { text: 'more filler still', full_text: '...', score: 0.5310, tags: '', index: 15 },
+      ] };
+    } else {
+      payload = { status: 'ok', results: [], error: 'No cartridge mounted' };
+    }
   } else if (req.url === '/api/store') {
-    payload = mode === 'healthy'
-      ? { status: 'ok', result: 'Stored memory #41 (12ms)' }
-      : { status: 'ok', result: 'No cartridge mounted. Use mount_cartridge first.' };
+    // A cart with nothing relevant to say is still a mounted cart — it stores.
+    payload = mode === 'unmounted'
+      ? { status: 'ok', result: 'No cartridge mounted. Use mount_cartridge first.' }
+      : { status: 'ok', result: 'Stored memory #41 (12ms)' };
   } else {
     payload = { status: 'ok', result: '' };
   }
@@ -52,7 +66,7 @@ const { membotStore, membotDualSearch } = await import('../dist/src/membot-bridg
 const snarc = [{ summary: 'a keyword-matched snarc hit', salience: 0.4, tier: 1 }];
 
 const runs = [];
-for (const m of ['healthy', 'unmounted']) {
+for (const m of ['healthy', 'irrelevant', 'unmounted']) {
   mode = m;
   runs.push({ m, stored: await membotStore(`probe ${m}`, 'check') });
   runs.push({ m, hits: (await membotDualSearch(`probe ${m}`, snarc, 3)).length });
@@ -69,11 +83,12 @@ const logPath = join(sandbox, '.snarc', 'membot', 'experiment_log.jsonl');
 if (!existsSync(logPath)) { console.error('FAIL: no experiment log written'); process.exit(1); }
 const rows = readFileSync(logPath, 'utf8').trim().split('\n').map(JSON.parse);
 
-console.log('event        outcome       available  stored  membot_unique  error');
+console.log('event        outcome       available  stored  membot_unique  top_score  relevant  error');
 for (const r of rows) {
   console.log(
     `${r.event.padEnd(12)} ${String(r.membot_outcome).padEnd(13)} ${String(r.membot_available).padEnd(10)} ` +
-    `${String(r.membot_stored ?? '-').padEnd(7)} ${String(r.membot_unique ?? '-').padEnd(14)} ${r.membot_error ?? ''}`
+    `${String(r.membot_stored ?? '-').padEnd(7)} ${String(r.membot_unique ?? '-').padEnd(14)} ` +
+    `${String(r.membot_top_score ?? '-').padEnd(10)} ${String(r.membot_relevant_count ?? '-').padEnd(9)} ${r.membot_error ?? ''}`
   );
 }
 
@@ -87,6 +102,27 @@ else if (healthySearch.membot_unique !== 2) fail.push(`healthy search returned 2
 if (!rows.some(r => r.event === 'dual_store' && r.membot_stored === true)) fail.push('a successful store must log membot_stored:true');
 if (!rows.some(r => r.event === 'dual_store' && r.membot_stored === false && r.membot_outcome === 'not_mounted'))
   fail.push('a store into an unmounted server must log membot_stored:false');
+if (healthySearch && healthySearch.membot_top_score !== 0.7161)
+  fail.push(`a healthy search must log the top score, got ${healthySearch.membot_top_score}`);
+
+// The case the fix exists for: a live cartridge with nothing relevant to say.
+// The server fills top_k anyway, so length alone reads identically to a real hit.
+const shrug = rows.find(r => r.event === 'dual_search' && r.query?.includes('irrelevant'));
+if (!shrug) fail.push('the irrelevant-results search did not reach the log');
+else {
+  if (shrug.membot_unique !== 5)
+    fail.push(`membot_unique should still be the misleading 5, got ${shrug.membot_unique}`);
+  if (shrug.membot_outcome !== 'empty')
+    fail.push(`5 sub-threshold hits must classify as empty, got '${shrug.membot_outcome}'`);
+  if (shrug.membot_relevant_count !== 0)
+    fail.push(`5 sub-threshold hits must count 0 relevant, got ${shrug.membot_relevant_count}`);
+  if (shrug.membot_top_score !== 0.5877)
+    fail.push(`the shrug must still record its top score, got ${shrug.membot_top_score}`);
+  if (shrug.membot_score_floor === undefined)
+    fail.push('a searched row must record the floor it was cut at');
+  if (healthySearch && shrug.membot_unique <= healthySearch.membot_unique)
+    fail.push('membot_unique fails to separate a real hit from a shrug — that is the point');
+}
 
 if (fail.length) { console.error('\nFAIL:\n  - ' + fail.join('\n  - ')); process.exit(1); }
 console.log(`\nOK — ${rows.length} rows, every failure mode distinguishable in the log.`);
