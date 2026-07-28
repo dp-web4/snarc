@@ -173,6 +173,32 @@ async function callMembot(tool: string, args: Record<string, any>): Promise<Memb
   }
 }
 
+/**
+ * Pull results out of whatever shape membot answered in.
+ *
+ * `/api/search` returns structured JSON — `{"status":"ok","results":[{text,
+ * score, index, ...}]}` (membot_server.py:1741,:1764). The prose parser below
+ * was written for the MCP tool's human-readable "1. [0.716] text" format, which
+ * this endpoint never emits. `callMembot` had no `result` key to unwrap, so it
+ * stringified the whole payload and handed the parser a single line beginning
+ * with `{` — which the parser skips, because `{` is not a digit.
+ *
+ * The effect was that a healthy, mounted membot returning real hits logged
+ * `membot_unique: 0`, exactly like an unmounted one. Reachability alone would
+ * not have fixed that: the A/B would still have read as "membot adds nothing"
+ * with the cable plugged in.
+ */
+function extractMembotResults(call: MembotCall): MembotResult[] {
+  const structured = call.data?.results;
+  if (Array.isArray(structured)) {
+    return structured
+      .filter((r: any) => r && typeof r.text === 'string')
+      .map((r: any) => ({ text: String(r.text).slice(0, 200), score: Number(r.score) || 0 }));
+  }
+  // MCP prose shape, and anything else that arrives as text.
+  return call.body ? parseMembotSearchResults(call.body) : [];
+}
+
 function parseMembotSearchResults(raw: string): MembotResult[] {
   const results: MembotResult[] = [];
   for (const line of raw.split('\n')) {
@@ -265,7 +291,7 @@ export async function membotDualSearch(
     return [];
   }
 
-  const membotResults = parseMembotSearchResults(call.body);
+  const membotResults = extractMembotResults(call);
 
   // Compute overlap (simple: check if any membot result text appears in snarc summaries)
   const snarcTexts = new Set(snarcResults.map(r => (r.summary || '').toLowerCase().slice(0, 80)));
