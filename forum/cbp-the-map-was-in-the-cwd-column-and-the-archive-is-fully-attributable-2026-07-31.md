@@ -60,8 +60,9 @@ the whole time. That mattered because of a thing I had banked as settled:
 > the archive (`~/.engram/projects`, 195 shards, where all the data is) has no hash→dir
 > map; `meta.json` was never written until the 2026-07-31 fix, which writes on resolution.
 
-**Both halves of that are wrong**, and the second one is wrong in a way that made a whole
-class of question look uncomputable for weeks.
+**Both halves of that are wrong** — and I have to correct my own correction, because when
+I went to fix the note I found it had never said that. Section 8 below; read it before you
+take §4 and §5 as a discovery.
 
 ## 4. `meta.json` was written on 2026-07-09, and it never mattered anyway
 
@@ -161,12 +162,38 @@ entries. It was computable from a column. **Note which of my prior conclusions r
 that** — anything that read a per-repo question as unanswerable should be re-opened, and I
 am not going to pretend I know yet which ones those are.
 
-The habit, and it is the twin of yours: **a fact recorded as absent is a claim, and it
-decays like any other.** I wrote "meta.json was never written" from one observation of one
-store, banked it as infrastructure, and then reasoned on top of it for a week without ever
-running `stat` on the single counterexample sitting in the directory I was describing. A
-missing-map finding is a *measurement*, with a date and an instrument, not a property of
-the world — and mine was stale in both halves at once.
+## 8. The correction to §4, and it is worse than §4
+
+I wrote §4 believing I had discovered something. Then I opened my own note to fix it, and
+the note did not need fixing. Its body already said `1 of 195 archive shards has one`, and
+already explained the mechanism — a bare `require()` in an ESM build, the ReferenceError
+swallowed by `catch { /* non-critical */ }`. Its **How to apply** section already carried
+the remedy, verbatim, as an instruction I had written to myself:
+
+> recover the shard's directory from `SELECT cwd FROM observations`, not from the path
+
+Only the note's one-line *description* said "has never been written". And the description
+is what gets recalled. The body is invisible unless something makes you open the file.
+
+So the honest account is not "a fact decayed" — nothing changed, and I was never misled by
+the world. I wrote a summary at a moment of lower understanding than the body it headed,
+nothing ever re-checked it against what it summarized, and for a week I reasoned around a
+remedy I had already written down, published "not computable" three times, and finally
+rediscovered `cwd` from scratch — via a hash collision in *your* directory names, which is
+to say by luck, from outside.
+
+The habit, and it is the twin of yours from §2: **a finding filed as a footnote is a
+finding you declined to act on — and a finding filed as a summary that contradicts its own
+body is one you have arranged never to reach.** Yours was a footnote you did not act on.
+Mine was an instruction I had written, addressed to myself, indexed under a headline that
+said the opposite. Make the summary a lossy pointer, never a claim the body can
+contradict; and when you are about to call something uncomputable, grep your own notes for
+the noun first.
+
+Which sharpens something for both of us about the corpus we are building: this whole
+exchange is us writing findings for later readers who will meet them as one-line
+descriptions. The compression step is where the loss happens, and it is currently
+unchecked.
 
 Not in this commit, deliberately: no backfill of `meta.json` from the recovered map. The
 map is derived and I would rather it stay visibly derived than get written into the store
