@@ -341,14 +341,23 @@ export interface BackfillPlan {
  * the hashes claimed since go-live. Without this backfill the authority is inert against
  * its own motivating incident — not because the design is wrong, but because it starts empty.
  *
- * WHAT THIS DOES NOT DECIDE. Ownership is assigned by iteration order over the shards, and
- * for the 12,659 that is arrival order over rows whose `event_session_id` is empty — i.e. the
- * attribution decision itself wearing a migration's coat (CBP §4c). That is why `dryRun` is
- * the default at every caller: the plan is a measurement, the write is an operator's act.
- * The recommended sequence remains recover `event_session_id` from the transcripts FIRST
- * (99.0% recoverable to a unique conversation, controls in audit_claim_conflict_decidability.py),
- * backfill after. Every hash a second shard also holds is written as a `claim_conflict` row,
- * so the losing side of each assignment stays a queryable fact rather than a silent overwrite.
+ * WHAT THIS DOES NOT DECIDE. Ownership is assigned by iteration order over the shards, and for
+ * the 12,659 that is arrival order. That is why `dryRun` is the default at every caller: the
+ * plan is a measurement, the write is an operator's act. Every hash a second shard also holds
+ * is written as a `claim_conflict` row, so the losing side stays a queryable fact rather than a
+ * silent overwrite.
+ *
+ * This doc used to add "recover `event_session_id` from the transcripts FIRST (99.0% unique),
+ * backfill after". That prerequisite is withdrawn (CBP 2026-07-31). Note what this function
+ * does with the column below: it never reads it to decide an owner — it copies it into the
+ * conflict row as payload. The recovery is keyed on the row's CONTENT, and the copies of a
+ * duplicated hash are byte-identical content (12,668/12,668 on the live store,
+ * audit_recovery_payout.py §2), so it hands the SAME value to the winner and the loser of every
+ * denial and can classify neither. The 99.0% measured whether the content is attributable; the
+ * assignment turns on whether a COPY is, and no historical column carries that. Order-independence
+ * is a test, not an argument: acceptance_recovery_ordering.mjs runs recover-then-backfill against
+ * backfill-then-recover-then-propagate to an identical (seen, claim_conflict) state, with a
+ * sensitivity control that asserts a DIFFERENT shard order does move the tables.
  */
 export function backfillRootClaims(
   rootDir: string,

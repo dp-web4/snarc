@@ -10,16 +10,30 @@
  * denied — demonstrated, not inferred, by acceptance_claim_recurrence.mjs check 1.
  *
  * WHAT IT DOES NOT DECIDE, and why the default is dry. Ownership is assigned by iteration order
- * over the shard directories. For the 12,659 that is arrival order over rows whose
- * `event_session_id` is empty — the attribution decision itself wearing a migration's coat.
- * The recommended sequence is unchanged and is dp's call, not this script's:
+ * over the shard directories, which for the 12,659 is arrival order. That is a choice, and it is
+ * dp's, not this script's — which is why nothing is written without --execute.
  *
- *     1. recover event_session_id from the transcripts   (99.0% unique, controls in
- *                                                         audit_claim_conflict_decidability.py)
- *     2. backfill seen                                   (this script, --execute)
- *     3. every loser is a claim_conflict row, queryable, not a silent overwrite
+ * THE SEQUENCE THIS HEADER USED TO PRESCRIBE, and why it is gone (CBP 2026-07-31). It read
+ * "1. recover event_session_id from the transcripts (99.0% unique)  2. backfill seen", with
+ * "running step 2 first is not wrong so much as irreversible on the axis step 1 repairs."
+ * The irreversibility does not exist, on three readings that are now checks in
+ * scripts/acceptance_recovery_ordering.mjs (four green, each sabotaged to confirm it can red):
  *
- * Running step 2 first is not wrong so much as irreversible on the axis step 1 repairs.
+ *   a. backfillRootClaims never reads event_session_id when deciding ownership — it claims in
+ *      shard order and copies the column into the conflict row as payload. Populated or NULL,
+ *      no assignment differs.
+ *   b. claim_conflict's PK is (content_hash, shard), exactly what a later recovery joins on.
+ *      Backfilling first leaves a NULL on an addressable row; the catch-up is an UPDATE.
+ *   c. the recovery's key is the CONTENT, and the copies of a duplicated hash are the same
+ *      content — 12,668/12,668 byte-identical across shards, measured over the full population
+ *      by scripts/audit_recovery_payout.py. So it is a constant function across the copies:
+ *      winner and loser receive the same value and it cannot classify a denial.
+ *
+ * The 99.0% measured whether the CONTENT is attributable. The backfill turns on whether a COPY
+ * is, and no historical column carries that (session_id is the constant ingest id, cwd is the
+ * shard restated, id/ts are write order). Of the 12,668: 12,570 resolve to one conversation —
+ * the same answer for both sides of every denial — and 59 resolve to more than one, where the
+ * instrument declines. Decision-irrelevant on 99.23%, unable on the rest.
  *
  * Usage:
  *   node scripts/backfill_seen.mjs                # DRY: report the plan, write nothing
@@ -78,7 +92,10 @@ if (winner && plan.totalConflicted > 0) {
 }
 if (!execute) {
   console.log('\nnothing was written. Re-run with --execute to perform it.');
-  console.log('Consider recovering event_session_id from the transcripts FIRST — the conflict');
-  console.log('rows written here carry whatever that column holds at the time, and it is the');
-  console.log('only axis on which the attribution this freezes can later be reviewed.');
+  console.log('This used to advise recovering event_session_id FIRST. It no longer does: the');
+  console.log('recovery is content-keyed, so it hands the SAME value to both sides of every');
+  console.log('denial and moves no assignment, and the conflict rows stay addressable by their');
+  console.log('own primary key afterwards. The open question here is the ownership ORDER, and');
+  console.log('that one is a choice — see audit_recovery_payout.py and');
+  console.log('acceptance_recovery_ordering.mjs.');
 }
