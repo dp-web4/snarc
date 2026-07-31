@@ -213,8 +213,17 @@ export class SNARCMemory {
    * this signature, so observations.ts was always WRITE time and keep-first froze ingest race
    * order while calling it provenance (CBP's falsification). Live-hook callers pass nothing —
    * for a hook firing on the event, write time IS event time.
+   *
+   * `eventSessionId` (optional): the EVENT's own conversation id — `ts`'s twin, off the same
+   * transcript entry, and it died at this same signature until it was threaded through here.
+   * It is stored in its OWN column and does NOT displace `this.sessionId`: the stored
+   * `session_id` is the INGESTING session, which is what consolidation and buffer rehydration
+   * scope on, while `event_session_id` is who actually said it. Conflating those two axes into
+   * one column is why 96.6% of the corpus sits under a single host id. Live-hook callers pass
+   * nothing — for a hook firing on the event, the ingesting session IS the event's session, and
+   * NULL is then the honest value rather than a copy.
    */
-  captureContext(kind: string, text: string, cwd: string, salience = 0.8, ts?: string): boolean {
+  captureContext(kind: string, text: string, cwd: string, salience = 0.8, ts?: string, eventSessionId?: string): boolean {
     const summary = summarize(text, 800);   // context carries meaning — keep more than tool telemetry (300)
     if (!summary.trim()) return false;
     // Idempotent re-capture: if this exact context is already in the STORE, no-op.
@@ -243,7 +252,13 @@ export class SNARCMemory {
         if (claimed.changes === 0) {
           const owner = this.claimStmts.getSeenOwner.get(hash) as { first_shard: string } | undefined;
           if (owner && owner.first_shard !== this.claims.shard) {
-            this.claimStmts.recordConflict.run(hash, this.claims.shard, this.sessionId || null, ts ?? null);
+            // Both session axes are recorded, in their own columns. `session_id` (ingest) is the
+            // one the replayer collapses to a constant host id; `event_session_id` is the one the
+            // re-attribution question can actually be asked on, and a NULL there is a legible
+            // "not knowable" rather than a confident wrong answer. See db.ts ROOT_CLAIMS_SCHEMA.
+            this.claimStmts.recordConflict.run(
+              hash, this.claims.shard, this.sessionId || null, ts ?? null, eventSessionId ?? null,
+            );
             return false;
           }
           // Owner IS this shard but the shard holds no row (fast path above missed):
@@ -265,6 +280,7 @@ export class SNARCMemory {
       cwd, JSON.stringify(tags),
       hash, SCORER_VERSION,
       ts ?? null,
+      eventSessionId ?? null,
     );
     return true;
   }

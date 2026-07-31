@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS observations (
   cwd             TEXT,
   tags            TEXT,
   content_hash    TEXT,
-  scored_by       TEXT
+  scored_by       TEXT,
+  event_session_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_obs_session ON observations(session_id);
@@ -243,6 +244,17 @@ CREATE INDEX IF NOT EXISTS idx_retrieval_unscored ON retrieval_log(relevant, sur
  * remembers hash → first_shard but not who was denied, and without this row the
  * pointer-row decision can never become a query and a later re-attribution pass has
  * nothing to join against.
+ *
+ * The amendment's own premise needed one repair before it could pay out (CBP, 2026-07-31,
+ * second reading): it argued the denial record makes the question decidable "with no proxy",
+ * and `session_id` was named as the key column. But `session_id` is the INGESTING session, and
+ * the writer that produces essentially every cross-shard denial is the transcript replayer,
+ * which stamps the constant host id 888f190a. Joining on it does not return NULL — it returns
+ * "the owner holds that session" for every denial between any two bulk shards, because that one
+ * id is in all of them (12,666/12,666, 12,672/12,672, 12,680/12,743). A confident constant is
+ * worse than a blank. `event_session_id` is the axis that can actually answer it, and it is
+ * NULLABLE on purpose: a NULL says "not knowable for this row" out loud, so the instrument's
+ * blind fraction is a column rather than a caveat.
  */
 const ROOT_CLAIMS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS seen (
@@ -254,8 +266,9 @@ CREATE TABLE IF NOT EXISTS seen (
 CREATE TABLE IF NOT EXISTS claim_conflict (
   content_hash TEXT NOT NULL,
   shard        TEXT NOT NULL,   -- the shard whose write was DENIED
-  session_id   TEXT,            -- the denied write's session (the decidable question's key column)
+  session_id   TEXT,            -- the INGESTING session of the denied write
   ts           TEXT NOT NULL DEFAULT (datetime('now')),  -- denied event's own ts when the caller has one
+  event_session_id TEXT,        -- the denied EVENT's own conversation id; NULL = not knowable
   PRIMARY KEY (content_hash, shard)
 ) WITHOUT ROWID;
 `;
@@ -282,6 +295,13 @@ export function openRootClaims(shardDbPath: string): RootClaims | null {
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 2000'); // hooks on two shards can claim in the same second
   db.exec(ROOT_CLAIMS_SCHEMA);
+  // Migration: claim_conflict.event_session_id. seen.db went live at c48af34 (2026-07-31 08:30Z)
+  // and CREATE TABLE IF NOT EXISTS will not widen the table it already made. Nullable ADD COLUMN
+  // — a NOT NULL ALTER is rejected outright, and NULL is the value this column WANTS for rows
+  // whose event session was never knowable. (ADD COLUMN is supported on WITHOUT ROWID tables.)
+  try {
+    db.exec(`ALTER TABLE claim_conflict ADD COLUMN event_session_id TEXT`);
+  } catch { /* already migrated */ }
   return { db, shard: basename(shardDir) };
 }
 
@@ -297,8 +317,8 @@ export function prepareClaimStatements(db: Database.Database) {
     // Record the denial (CBP's amendment) — never silently. INSERT OR IGNORE: a repeated
     // denial from the same shard is the same fact, not a new one.
     recordConflict: db.prepare(`
-      INSERT OR IGNORE INTO claim_conflict (content_hash, shard, session_id, ts)
-      VALUES (?, ?, ?, COALESCE(datetime(?), datetime('now')))
+      INSERT OR IGNORE INTO claim_conflict (content_hash, shard, session_id, ts, event_session_id)
+      VALUES (?, ?, ?, COALESCE(datetime(?), datetime('now')), ?)
     `),
   };
 }
@@ -357,6 +377,26 @@ export function openDatabase(path?: string): Database.Database {
     db.exec(`ALTER TABLE observations ADD COLUMN scored_by TEXT`);
   } catch { /* already migrated */ }
 
+  // Migration: event_session_id — the EVENT's own conversation id, the twin of the `ts` repair
+  // that landed at c48af34. Claude Code transcripts carry `sessionId` on every line (measured
+  // 2026-07-31: 400 sampled files, 400 distinct ids, exactly one per file, zero files carrying
+  // two), and claudeRecognizer read `entry.timestamp` off that same entry while stepping over
+  // `entry.sessionId`. Both provenance fields died at captureContext's signature; only ts was
+  // revived. `session_id` records the INGESTING session — for the replayer that is the constant
+  // host id 888f190a (kimi, 2026-07-31: a host_session_id, not a CLI session), so it is one value
+  // across 12,666/12,666, 12,672/12,672 and 12,680/12,743 rows of the bulk shards.
+  //
+  // This is a SEPARATE column, deliberately, and not a repair of session_id in place: consolidate()
+  // and rehydrateBuffer() read getSessionObservations(this.sessionId), i.e. INGEST scope, and
+  // overwriting session_id with the transcript's id would silently empty both. Ingest scope and
+  // event provenance are two different axes; the corpus had one column for them and the ingest
+  // axis won. Existing rows keep NULL — the honest value, since their event session was never
+  // written anywhere.
+  try {
+    db.exec(`ALTER TABLE observations ADD COLUMN event_session_id TEXT`);
+  } catch { /* already migrated */ }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_obs_event_session ON observations(event_session_id)`);
+
   // Index AFTER the ALTER, for the same reason base_salience's index is here: on a
   // pre-migration db the SCHEMA block runs before the column exists.
   db.exec(`CREATE INDEX IF NOT EXISTS idx_obs_content_hash ON observations(content_hash)`);
@@ -405,11 +445,16 @@ export function prepareStatements(db: Database.Database) {
     // COALESCE keeps garbage/absent values at write time, and datetime() normalizes
     // ISO 'T…Z' to the column's existing 'YYYY-MM-DD HH:MM:SS' so ORDER BY ts stays
     // lexicographic across both writers.
+    // `ts` = the event's own timestamp (c48af34), `event_session_id` = the event's own
+    // conversation id — the two halves of the same provenance, both parsed by the recognizers
+    // off the same transcript entry. `session_id` remains the INGESTING session: it is what
+    // consolidation and buffer rehydration scope on, and conflating the two axes into one
+    // column is how the corpus ended up with 96.6% of every row under one host id.
     insertObservationTs: db.prepare(`
       INSERT INTO observations (session_id, tool_name, input_summary, output_summary,
         surprise, novelty, arousal, reward, conflict, salience, base_salience, cwd, tags,
-        content_hash, scored_by, ts)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(datetime(?), datetime('now')))
+        content_hash, scored_by, ts, event_session_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(datetime(?), datetime('now')), ?)
     `),
 
     // STORE-scoped, not session-scoped. The session predicate was dropped 2026-07-31.

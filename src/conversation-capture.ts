@@ -29,12 +29,19 @@ export interface TranscriptTurn {
   role: 'user' | 'assistant';
   content: string;
   ts?: string;
+  /**
+   * The EVENT's own conversation id, when the transcript carries one. Twin of `ts`: both are
+   * provenance of the turn, as against the ingest that replayed it. Only set by a recognizer
+   * that has CONFIRMED its format carries a per-conversation id — an absent `sid` degrades to
+   * "unknown", which is the honest value; guessing a field name is a silent no-match.
+   */
+  sid?: string;
 }
 
 /** Minimal surface of SNARCMemory this module needs — avoids a circular import. */
 export interface MemoryLike {
   capture(toolName: string, input: string, output: string, cwd: string, exitCode?: number): unknown;
-  captureContext(kind: string, text: string, cwd: string, salience?: number, ts?: string): boolean;
+  captureContext(kind: string, text: string, cwd: string, salience?: number, ts?: string, eventSessionId?: string): boolean;
   getContext(sessionId?: string, timestamp?: string, limit?: number): any[];
 }
 
@@ -57,17 +64,33 @@ export function extractTextContent(entry: any): string {
  * Registering a recognizer is how a non-Claude harness plugs into snarc capture
  * without forking parseTranscript (Kimi's integration note #3, 2026-07-21: don't
  * make every non-Claude agent re-implement the parser).
+ *
+ * A recognizer receives ONE parsed entry and nothing else, so a format that carries its session
+ * id outside the line (kimi-code: `…/session_<uuid>/agents/main/wire.jsonl` — the id is in the
+ * PATH; no wire entry carries it, checked against the key union of 500 entries) cannot supply
+ * `sid` here. That is a named gap, not an oversight: closing it means passing the transcript path
+ * down to the recognizer, a wider change than this one, and a guessed field name is a silent
+ * no-match. kimi turns therefore keep `event_session_id` NULL, which is the honest value.
  */
 export type TurnRecognizer = (entry: any) => TranscriptTurn | null;
 
-/** Claude Code transcripts: type:'user'/'assistant' (or role); content under .message/.content. */
+/**
+ * Claude Code transcripts: type:'user'/'assistant' (or role); content under .message/.content.
+ *
+ * `entry.sessionId` is the turn's own conversation id and sits on the SAME entry this function
+ * already reads `entry.timestamp` from. Until now it was stepped over, so every replayed turn
+ * reached the store labelled with the INGESTING session — for the replayer, the constant host id.
+ * Measured 2026-07-31 over 400 transcript files: 400 distinct ids, exactly one per file, zero
+ * files carrying two. It is a clean per-conversation key.
+ */
 export const claudeRecognizer: TurnRecognizer = (entry) => {
+  const sid = typeof entry.sessionId === 'string' ? entry.sessionId : undefined;
   if (entry.type === 'user' || entry.type === 'human' || entry.role === 'user') {
     const content = extractTextContent(entry);
-    if (content && content.length > 20) return { role: 'user', content, ts: entry.timestamp || entry.ts };
+    if (content && content.length > 20) return { role: 'user', content, ts: entry.timestamp || entry.ts, sid };
   } else if (entry.type === 'assistant' || entry.role === 'assistant') {
     const content = extractTextContent(entry);
-    if (content && content.length > 50) return { role: 'assistant', content, ts: entry.timestamp || entry.ts };
+    if (content && content.length > 50) return { role: 'assistant', content, ts: entry.timestamp || entry.ts, sid };
   }
   return null;
 };
@@ -218,7 +241,12 @@ export function captureConversationTurns(
     // stored row's ts is when this was said, not when this ingest ran (it died at captureContext's
     // signature until 2026-07-31, which voided every wall-clock provenance reading on replayed
     // transcripts — CBP, forum/cbp-the-question-your-design-rests-on-…-2026-07-31.md §1).
-    memory.captureContext('Conversation', taggedSummary, cwd, semantic, turn.ts);
+    // turn.sid is the EVENT's conversation id — the second half of the same signature repair.
+    // Without it the stored row (and every claim_conflict row the root authority writes) carries
+    // the INGESTING session, which for the replayer is one constant host id; the denial record's
+    // "was this from a session the owner never saw" then has a single value to ask about and
+    // answers "the owner has it" for every shard, by construction. See db.ts event_session_id.
+    memory.captureContext('Conversation', taggedSummary, cwd, semantic, turn.ts, turn.sid);
     membotStore(taggedSummary, 'conversation').catch(() => {});
     existing.add(taggedSummary);
     captured++;
