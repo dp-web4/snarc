@@ -5,7 +5,7 @@
 
 import Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -45,10 +45,13 @@ export function getDbPath(launchDir?: string): string {
   const hash = createHash('sha256').update(dir).digest('hex').slice(0, 12);
   const projectDir = join(SNARC_ROOT, 'projects', hash);
   mkdirSync(projectDir, { recursive: true });
-  // Write a metadata file so we can map hash → directory
+  // Write a metadata file so we can map hash → directory.
+  // NOTE: this used a bare `require('node:fs')`, which is not defined in an ESM
+  // build ("type": "module") — every call threw ReferenceError into the silent
+  // catch below, so no shard has ever carried a meta.json and the hash → dir map
+  // does not exist on disk. Use the top-level import instead.
   const metaPath = join(projectDir, 'meta.json');
   try {
-    const { writeFileSync, existsSync } = require('node:fs');
     if (!existsSync(metaPath)) {
       writeFileSync(metaPath, JSON.stringify({ dir, hash, created: new Date().toISOString() }));
     }

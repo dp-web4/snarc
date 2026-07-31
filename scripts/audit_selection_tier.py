@@ -39,6 +39,7 @@ repair from a dead instrument.
 """
 import argparse
 import os
+import re
 import sqlite3
 import sys
 from collections import Counter, defaultdict
@@ -184,17 +185,58 @@ def check_channel(conn):
         "SELECT COUNT(*) FROM retrieval_log WHERE item_kind='identity'").fetchone()[0]
     lo, hi = conn.execute("SELECT MIN(ts), MAX(ts) FROM observations").fetchone()
     print(f"           identity tier     {ident:>7} stored, {surf} surfacings")
-    # A young store is empty because it is young.  Reporting that as a defect is the
-    # bad-denominator error this check exists to prevent, so it is stated, not scored.
-    young = lo and hi and lo[:10] == hi[:10]
-    if not ident or not surf:
-        if young:
-            print(f"           -> empty, but this store only spans {lo} .. {hi}: too young "
-                  f"to distinguish 'not built yet' from 'not built'. NOT scored.")
-        else:
-            print("           -> the identity tier is empty here: the 'fixed content, fixed "
-                  "length' arm has no treatment to withhold")
+    # The identity tier is not populated by writing to it.  It is populated by
+    # deep-consolidation proposing an `identity` pattern and that proposal being
+    # RE-proposed until frequency >= REOCCUR_THRESHOLD (deep-consolidation.ts:158;
+    # 3, or 1 when auto_promote_identity is on).  So "empty" and "young" are not the
+    # only two states, and store age does not decide between them: read the pipeline.
+    # HEAD's writers emit source in {deep-dream-immediate, reproduced-<N>x,
+    # human-confirmed} (deep-consolidation.ts:177-178, memory.ts:441).  Anything else
+    # in the column was written by code that is no longer in the tree.
+    HEAD_SOURCES_RE = r'^(deep-dream-immediate|reproduced-[0-9]+x|human-confirmed)$'
+    try:
+        auto = conn.execute(
+            "SELECT value FROM settings WHERE key='auto_promote_identity'").fetchone()
+    except sqlite3.Error:
+        auto = None
+    threshold = 1 if (auto and str(auto[0]) not in ('0', '', 'false')) else 3
+    props = conn.execute(
+        "SELECT COUNT(*), COALESCE(MAX(frequency), 0) FROM patterns "
+        "WHERE kind='proposed_identity'").fetchone()
+    deep_runs = conn.execute(
+        "SELECT COUNT(*) FROM patterns WHERE kind LIKE 'deep\\_%' ESCAPE '\\'").fetchone()[0]
+    print(f"           promotion path    {props[0]} proposed_identity pattern(s), "
+          f"max frequency {props[1]} of {threshold} needed; "
+          f"{deep_runs} deep_* pattern(s) "
+          f"({'deep-consolidation has run' if deep_runs else 'no evidence it has run'})")
+    if ident:
+        srcs = sum(
+            1 for (s,) in conn.execute("SELECT source FROM identity")
+            if not re.match(HEAD_SOURCES_RE, s or ''))
+        newest = conn.execute("SELECT MAX(created_at) FROM identity").fetchone()[0]
+        print(f"           identity writers  {srcs} of {ident} row(s) carry a source no "
+              f"code path at HEAD can emit; newest identity write {newest}")
+        if srcs == ident:
+            print("           -> the tier is WRITE-FROZEN: every row was written by a "
+                  "retired writer, and the current promotion path has produced none of "
+                  "them. 'Fixed content for N weeks' is the tier not being written, not "
+                  "the tier being stable.")
+            failed.append('identity-writer')
+    else:
+        if deep_runs and props[0] == 0:
+            print("           -> the identity tier is empty and deep-consolidation HAS run "
+                  "here without proposing one: the promotion path fired and yielded "
+                  "nothing. The withhold arm has no treatment, and waiting is not the "
+                  "remedy — this is scored regardless of store age.")
             failed.append('identity-tier')
+        elif props[0]:
+            print(f"           -> empty, but {props[0]} proposal(s) are accumulating; the "
+                  f"tier is {threshold - props[1]} re-proposal(s) from its first promotion. "
+                  f"Reported, not scored.")
+        else:
+            print(f"           -> empty, and deep-consolidation has not run here "
+                  f"(store spans {lo} .. {hi}): 'not built yet' and 'not built' are still "
+                  f"indistinguishable. NOT scored.")
     tgt = conn.execute("SELECT COUNT(*) FROM target_outcomes").fetchone()[0]
     vals = conn.execute("SELECT COUNT(DISTINCT last_success) FROM target_outcomes").fetchone()[0]
     print(f"           target_outcomes   {tgt:>7} rows, {vals} distinct last_success")

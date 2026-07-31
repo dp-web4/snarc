@@ -14,6 +14,19 @@
 
 ## 1. The problem, measured
 
+> **SCOPE — read before any number below.** Every measurement in this document comes from
+> **one of 195 archive shards**: `~/.engram/projects/791cace57ce9/engram.db`, which is the
+> sha256 prefix of the directory `/mnt/c/exe/projects` (the workspace *parent*, one segment
+> above `ai-agents`), consolidating 17 real project cwds. Fleet totals across all 195 shards:
+> **921,478 observations, 19,953 retrieval rows, 386 identity rows across 41 shards.** Our
+> shard therefore holds 76.4% of fleet observations and 53.7% of fleet briefings — the bulk,
+> not a slice — **but only 6 of 386 identity rows**; one shard (synchronism-chemistry) holds
+> 84. Any statement below about *pool size* is shard-local. Statements about the *selector*
+> are code-level and generalise. See defects #8–#10 for why we could not read this off disk.
+>
+> Read stores through `file:...?mode=ro`. The archive carries a 193 MB `-wal`; a flat file
+> copy silently drops it and reports `retrieval_log` = 10,715 instead of 10,724.
+
 On CBP, 2026-07-31, against `~/.engram/projects/791cace57ce9/engram.db`:
 
 | signal | value | status |
@@ -389,16 +402,20 @@ unless something re-indexes the attachments onto the §6 secondary full-text pat
 in scope for the migration and is the same pass as §4's step 1 — the prediction mining walks all
 704k rows anyway, so it is the natural place to emit the attachment index. One pass, two products.
 
-### 10.1 Seven standing defects, reported not patched
+### 10.1 Ten standing defects, reported not patched
 
 Found by the writer inventory (#1–#3), the outcome-instrument audit (#4), the holdout sizing
-pass (#5), and the selection audit (#6–#7); all seven corrupt the existing store and any replay
-run against it.
+pass (#5), the selection audit (#6–#7), and the store/writer read (#8–#10); all corrupt the
+existing store and any replay run against it.
 
 **Which store.** Every number below is from `~/.engram/projects/791cace57ce9/engram.db` at ref
-`max(id)=10724`, a store that took its last write **2026-07-31T04:20Z** and will take no more.
-The live store is `~/.snarc/projects/<hash>/snarc.db`, sharded per project, and none of these
-defects has yet been confirmed there. Name the writer, not just the path.
+`max(id)=10724`, a store that took its last write **2026-07-31T04:20Z** and will take no more —
+and which is **1 of 195 archive shards**, keyed to `/mnt/c/exe/projects` (see the SCOPE block in
+§1). The live store is `~/.snarc/projects/<hash>/snarc.db`. Its shards are **not** a partition:
+25,344 rows summed over four shards are 12,721 distinct content hashes (49.8% duplication), and
+one session appears in two shards under two cwds — so summing shards for a fleet number
+overstates by ~2x. Defects #4, #6 and #7 are confirmed to reproduce live; the rest are not yet.
+Name the writer, not just the path.
 
 | # | defect | site | effect |
 |---|---|---|---|
@@ -407,8 +424,12 @@ defects has yet been confirmed there. Name the writer, not just the path.
 | 3 | dimension columns carry no per-item information | `memory.ts:176` | `conflict` has **5 distinct values across 704,049 rows**; `surprise` is two constants covering 100.0%; 92.8% of rows sit in three constant triples. Stated this way the defect needs no code read — see below |
 | 4 | retrieval outcome is item-blind | `memory.ts:352-372` | `retrieval_log.relevant` measures token budget and genre, not usefulness; a random other memory scores the same (§8) |
 | 5 | outcome half of the act grain is not captured | writer path | 58/12,310 (0.5%) of tool rows carry any `output_summary`, **all 58 on 2026-07-01**; the other 12,252 hold the literal string `""` (not NULL, not empty — a `trim()=''` test reads the channel as 100% healthy). Last tool event of any kind: **2026-07-24**. Inputs captured in full. Mismatch is outcome-vs-expectation, so no outcome metric in §8.1 is computable and the holdout cannot be sized (§8.2) |
-| 6 | the selector is a constant function on two of three tiers | `memory.ts:293,304,317` | `slice(0,3)` is a **quota, not a ranking cut**: 91.0% of briefings are exactly (3,3,3) slots, and no tier can abstain. Identity surfaces the same 3 of its 6 rows in **1,217 of 1,217** briefings since 2026-07-04 — zero departures — and pattern is 3 distinct in 1,217/1,217 too (newest identity row 2026-05-20). Pattern top-3 = 72.1% of surfacings with the tautology at #1 (n=1,212) against the two substantive operational patterns at 68 and 62 |
+| 6 | the selector is a constant function on two of three tiers — **and the source table is write-frozen** | `memory.ts:293,304,317`; `deep-consolidation.ts:151-182` | **Two stacked failures.** (i) `slice(0,3)` is a **quota, not a ranking cut**: 91.0% of briefings are exactly (3,3,3) slots, and no tier can abstain. Identity surfaces the same 3 of its 6 rows in **1,217 of 1,217** briefings since 2026-07-04 — zero departures — and pattern is 3 distinct in 1,217/1,217 too. Pattern top-3 = 72.1% of surfacings with the tautology at #1 (n=1,212) against the two substantive operational patterns at 68 and 62. (ii) **all 6 identity rows carry `source='deep-dream-auto'`, which no code path at HEAD can emit** (HEAD emits only `deep-dream-immediate` / `reproduced-<N>x` / `human-confirmed`); newest identity write **2026-05-20**. The current writer is a re-occurrence gate promoting at `frequency >= 3`, and in four months over 704k observations and 28 deep-consolidation runs it has produced **1 proposal at frequency 1 and zero promotions**. "Fixed content for ten weeks" is the tier *not being written*, not the tier being stable — and the pool size of 6 is shard-local (fleet: 386 across 41 shards, max 84) |
 | 7 | the quota pads with repeats | `memory.ts:317` (observation tier) | the same item can occupy 2–3 of a tier's 3 slots: **522 padded slots, 4.9% of all surfacings**. Observation is 3 *slots* in 91.0% of briefings but 3 *distinct items* in **57.1%** (distinct-per-briefing 3→695, 2→334, 1→147, 0→41). Every "3 items" elsewhere in this document means 3 slots; k_effective is **8.383**, not 9, and per-instance holdout assignment is therefore a variable-dose treatment (§8.1) |
+
+| 8 | `meta.json` — the only hash → directory provenance the system records — has never been written | `db.ts:50-55` | `getDbPath` obtains `writeFileSync` via a bare `require('node:fs')` inside an ESM build (`"type": "module"` since the initial commit). `require` is undefined; every call has thrown `ReferenceError` into a `catch { /* non-critical */ }` since `1ab5ee9`, the commit that introduced sharding. Observed: **1 of 195** archive shards and **0 of 4** live shards carry a `meta.json`. Consequence: which directory a shard represents is unrecoverable without a full census — which is why §1's SCOPE block took eight rounds to write. **Fixed at this commit** (top-level import; verified against a scratch root) |
+| 9 | workspace consolidation is off — the rename moved the marker in the code and not on disk | `db.ts:30` (`8aacf1a`) | `resolveWorkspaceDir` walks up for `.snarc-root`. On disk the marker is `/mnt/c/exe/projects/.engram-root` (created 2026-07-08 20:46). Falls through to per-directory sharding. **Natural experiment:** the 194 non-consolidated archive shards wrote 32,086 observations on 07-08, 4,187 on 07-09, and **67 on 07-10** — a 480x collapse the day after the marker appeared, with 791cace57ce9 taking over. Consolidation demonstrably worked; it is now silently off, and the live store reached 4 shards in its first 2 hours. **Not patched:** either fix re-routes every live write in the fleet mid-flight, which is an operator decision |
+| 10 | two workspace resolvers with disjoint rules, documented as one | `hooks/lib/project-root.ts:17`, `db.ts:25` | Hooks compose them: `getDbPath(resolveProjectRoot(cwd))`. The first walks up for `CLAUDE.md`/`AGENTS.md` then `.git`; the second walks up for `.snarc-root`. `db.ts:22` states they are "the single resolver shared by the hooks (writers) and the MCP server (reader), so they can no longer disagree on which DB is 'the project'." At HEAD they disagree by construction |
 
 **#3's two halves have different evidentiary standing.** The *mechanism* — that `captureContext`
 bypassed the scorer, hence 98.3% never scored — rests on a code read and is single-seat. The
@@ -457,6 +478,24 @@ change with its own test, not a rider on a design PRD.
 ## 11. Falsifiable success criteria
 
 Stated as predictions so they can be wrong:
+
+0. **Step 0 — restore the channel, then seed the tier.** Nothing below can run first. Acceptance
+   test is `python3 scripts/audit_selection_tier.py --db <store>` clearing CHANNEL, which now has
+   **three** conjuncts, all confirmed FAILING today on every store we have:
+   - `attempt-outcomes` — tool events recorded with their payload, not the literal `""`. (Live
+     shards write **no tool rows at all**: `tool_name` is only `Conversation`/`user_prompt`.)
+   - `session-boundaries` — sessions closing. Archive 33.8%; live shards 8–67%.
+   - `identity-tier` / `identity-writer` — the withhold arm's treatment must exist in the shard the
+     arm targets, and must have been written by a path that still exists. Three seeding options,
+     with their costs: `auto_promote_identity=1` (threshold 3→1; the code's own comment calls this
+     the dangerous path, and it makes the treatment a single unreproduced guess); wait for
+     re-occurrence (observed rate **1 proposal / 4 months at frequency 1** — not a schedule); or
+     write the tier directly as `human-confirmed`. **Recommend the third:** the arm asks whether
+     withholding a fixed block changes behaviour, not whether the block was earned.
+
+   An arm whose treatment is absent is not underpowered; it is unidentified, in the same way an
+   unobservable regression is (see the 4a withdrawal in
+   `forum/cbp-the-store-we-measured-stopped-taking-writes-...-2026-07-31.md`).
 
 1. **Replay test.** Score one day of real tool calls both ways. The act-grain model ranks the handshake
    `422` and the `already-patched` false green at the top; the novelty model ranks port numbers. If it
