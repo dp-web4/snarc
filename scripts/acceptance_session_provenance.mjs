@@ -52,6 +52,10 @@
  *      copying the ingest id — the blind fraction stays countable as a column.
  *   6. green both: a standalone store still captures. Exists so 1-5 cannot be satisfied by
  *      captureContext becoming a no-op.
+ *   7. end-to-end: a Claude transcript replay lands the conversation id on the row.
+ *   8. the kimi wire format derives its sid from the PATH (`session_<uuid>/agents/<agent>/
+ *      wire.jsonl` — measured 175/175 on this host, 0 misses, kimi 2026-07-31), and a
+ *      non-matching path yields no sid rather than a guessed one.
  *
  * Run:  node scripts/acceptance_session_provenance.mjs
  */
@@ -84,7 +88,7 @@ const CONV_A = 'conv-alpha-11111111';
 const CONV_B = 'conv-beta-22222222';
 
 const { SNARCMemory } = await import('../dist/src/memory.js');
-const { claudeRecognizer, parseTranscript } = await import('../dist/src/conversation-capture.js');
+const { claudeRecognizer, kimiRecognizer, parseTranscript } = await import('../dist/src/conversation-capture.js');
 const Database = (await import('better-sqlite3')).default;
 
 const seenDb = () => new Database(join(root, 'seen.db'), { readonly: true });
@@ -209,6 +213,40 @@ check('7. end-to-end: a transcript replay lands the conversation id on the row',
   if (turns.length !== 1) throw new Error(`parsed ${turns.length} turns, want 1`);
   if (turns[0].sid !== CONV_B) throw new Error(`parseTranscript dropped sid (${turns[0].sid})`);
   return `parsed sid = ${turns[0].sid}`;
+});
+
+// The kimi half of the corpus: no wire entry carries the session id — it lives in the PATH
+// (`…/session_<uuid>/agents/<agent>/wire.jsonl`). Measured 2026-07-31 on this host: 175/175
+// wire.jsonl match, 0 misses; subagent wires (agent-2, …) share the parent session uuid, which
+// is correct — they are events OF that conversation.
+const KIMI_UUID = '2b4e21e7-5101-4f25-a3d8-c6a33fafafce';
+const KIMI_WIRE_ENTRY = {
+  type: 'context.append_loop_event',
+  timestamp: EVENT_TS,
+  event: { type: 'content.part', part: { type: 'text', text: TEXT + ' — long enough to clear the kimi floor' } },
+};
+
+check('8. the kimi recognizer derives sid from the transcript PATH, and guesses nothing', () => {
+  const wirePath = join(root, 'sessions', 'wd_test_abc123', `session_${KIMI_UUID}`, 'agents', 'main', 'wire.jsonl');
+  const turn = kimiRecognizer(KIMI_WIRE_ENTRY, { transcriptPath: wirePath });
+  if (!turn) throw new Error('kimiRecognizer did not recognize a well-formed wire entry');
+  if (turn.sid !== KIMI_UUID) {
+    throw new Error(`turn.sid is ${turn.sid}, want ${KIMI_UUID} — the path is not being read`);
+  }
+  // The honest-blind half: a path that does not match the kimi shape yields NO sid — never a
+  // guessed one. And with no context at all (the pre-fix call shape), the same holds.
+  const oddPath = kimiRecognizer(KIMI_WIRE_ENTRY, { transcriptPath: join(root, 'transcripts', 'wire.jsonl') });
+  if (oddPath.sid !== undefined) throw new Error(`invented a sid (${oddPath.sid}) from a non-kimi path`);
+  const noCtx = kimiRecognizer(KIMI_WIRE_ENTRY);
+  if (noCtx.sid !== undefined) throw new Error(`invented a sid (${noCtx.sid}) with no context`);
+  // End-to-end through the real replay path, subagent wire included.
+  const subPath = join(root, 'sessions', 'wd_test_abc123', `session_${KIMI_UUID}`, 'agents', 'agent-2', 'wire.jsonl');
+  mkdirSync(join(root, 'sessions', 'wd_test_abc123', `session_${KIMI_UUID}`, 'agents', 'agent-2'), { recursive: true });
+  writeFileSync(subPath, JSON.stringify(KIMI_WIRE_ENTRY) + '\n');
+  const parsed = parseTranscript(subPath);
+  if (parsed.length !== 1) throw new Error(`parsed ${parsed.length} turns, want 1`);
+  if (parsed[0].sid !== KIMI_UUID) throw new Error(`parseTranscript dropped the path-derived sid (${parsed[0].sid})`);
+  return `sid = ${KIMI_UUID.slice(0, 8)}… off the path (main AND subagent wire); non-matching path stays undefined`;
 });
 
 memA.close();

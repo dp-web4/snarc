@@ -65,14 +65,22 @@ export function extractTextContent(entry: any): string {
  * without forking parseTranscript (Kimi's integration note #3, 2026-07-21: don't
  * make every non-Claude agent re-implement the parser).
  *
- * A recognizer receives ONE parsed entry and nothing else, so a format that carries its session
- * id outside the line (kimi-code: `…/session_<uuid>/agents/main/wire.jsonl` — the id is in the
- * PATH; no wire entry carries it, checked against the key union of 500 entries) cannot supply
- * `sid` here. That is a named gap, not an oversight: closing it means passing the transcript path
- * down to the recognizer, a wider change than this one, and a guessed field name is a silent
- * no-match. kimi turns therefore keep `event_session_id` NULL, which is the honest value.
+ * A recognizer receives one parsed entry plus an optional context. The context exists because
+ * kimi-code carries its session id OUTSIDE the line: `…/session_<uuid>/agents/<agent>/wire.jsonl`
+ * — the id is in the PATH; no wire entry carries it (CBP checked the key union of 500 entries).
+ * Until the context existed, kimi turns kept `event_session_id` NULL. Now `transcriptPath` is
+ * passed down and kimiRecognizer derives the sid from it — still only where the corpus confirms
+ * the shape (2026-07-31, kimi: 175/175 wire.jsonl on this host match
+ * `session_<uuid>/agents/<agent>/wire.jsonl`, 0 misses; subagent wires share the parent session
+ * uuid, which is correct — they are events OF that conversation). A path that does not match
+ * yields no sid, never a guessed one: a guessed field name is a silent no-match.
  */
-export type TurnRecognizer = (entry: any) => TranscriptTurn | null;
+export interface RecognizerContext {
+  /** Path of the transcript being parsed — some formats carry the session id only here. */
+  transcriptPath?: string;
+}
+
+export type TurnRecognizer = (entry: any, ctx?: RecognizerContext) => TranscriptTurn | null;
 
 /**
  * Claude Code transcripts: type:'user'/'assistant' (or role); content under .message/.content.
@@ -101,13 +109,22 @@ export const claudeRecognizer: TurnRecognizer = (entry) => {
  * Ported verbatim from Kimi's own verified reference (shared-context/kimi-memory/lib/
  * kimi-transcript.js) so the shape is confirmed, not guessed. User prompts (turn.prompt) are
  * not recognized here yet — a known gap, left rather than guessed at (guessing = silent no-match).
+ *
+ * The sid comes from the PATH, not the entry: `…/session_<uuid>/agents/<agent>/wire.jsonl`.
+ * Only the bare uuid is taken, so the column stays comparable with claudeRecognizer's
+ * entry.sessionId. A non-matching path leaves sid undefined — NULL is the honest value.
  */
-export const kimiRecognizer: TurnRecognizer = (entry) => {
+const KIMI_PATH_SID = /session_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//i;
+
+export const kimiRecognizer: TurnRecognizer = (entry, ctx) => {
   if (entry.type === 'context.append_loop_event') {
     const ev = entry.event;
     if (ev?.type === 'content.part' && ev.part?.type === 'text' && ev.part.text) {
       const content = String(ev.part.text).trim();
-      if (content && content.length > 50) return { role: 'assistant', content, ts: entry.timestamp || entry.ts };
+      if (content && content.length > 50) {
+        const sid = ctx?.transcriptPath ? KIMI_PATH_SID.exec(ctx.transcriptPath)?.[1] : undefined;
+        return { role: 'assistant', content, ts: entry.timestamp || entry.ts, sid };
+      }
     }
   }
   return null;
@@ -131,6 +148,7 @@ export function parseTranscript(
     return turns; // transcript not readable
   }
   const NL = 0x0a;
+  const ctx: RecognizerContext = { transcriptPath };
   let start = 0;
   while (start < buf.length) {
     let nl = buf.indexOf(NL, start);
@@ -141,7 +159,7 @@ export function parseTranscript(
         // Try each format recognizer; first match wins per line. Claude and Kimi
         // shapes are both handled without forking this loop (see TURN_RECOGNIZERS).
         for (const recognize of recognizers) {
-          const turn = recognize(entry);
+          const turn = recognize(entry, ctx);
           if (turn) { turns.push(turn); break; }
         }
       } catch {
