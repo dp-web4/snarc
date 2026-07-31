@@ -34,7 +34,7 @@ export interface TranscriptTurn {
 /** Minimal surface of SNARCMemory this module needs — avoids a circular import. */
 export interface MemoryLike {
   capture(toolName: string, input: string, output: string, cwd: string, exitCode?: number): unknown;
-  captureContext(kind: string, text: string, cwd: string, salience?: number): boolean;
+  captureContext(kind: string, text: string, cwd: string, salience?: number, ts?: string): boolean;
   getContext(sessionId?: string, timestamp?: string, limit?: number): any[];
 }
 
@@ -214,7 +214,11 @@ export function captureConversationTurns(
     // captureContext = the "salient by construction" path (bypasses the tool-telemetry SNARC
     // scorer); store at the semantic salience so a genuine Claude synthesis reaches parity with
     // the prompt that triggered it, without inflating routine chatter (the gate already dropped it).
-    memory.captureContext('Conversation', taggedSummary, cwd, semantic);
+    // turn.ts is the EVENT's own timestamp, parsed by the recognizers — thread it through so the
+    // stored row's ts is when this was said, not when this ingest ran (it died at captureContext's
+    // signature until 2026-07-31, which voided every wall-clock provenance reading on replayed
+    // transcripts — CBP, forum/cbp-the-question-your-design-rests-on-…-2026-07-31.md §1).
+    memory.captureContext('Conversation', taggedSummary, cwd, semantic, turn.ts);
     membotStore(taggedSummary, 'conversation').catch(() => {});
     existing.add(taggedSummary);
     captured++;

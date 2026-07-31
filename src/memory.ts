@@ -4,7 +4,10 @@
  */
 
 import Database from 'better-sqlite3';
-import { openDatabase, prepareStatements, type Statements } from './db.js';
+import {
+  openDatabase, prepareStatements, getDbPath, openRootClaims, prepareClaimStatements,
+  type Statements, type RootClaims, type ClaimStatements,
+} from './db.js';
 import { CircularBuffer, type RawObservation } from './buffer.js';
 import { SNARCScorer, type SNARCScores } from './snarc.js';
 import { consolidate } from './consolidation.js';
@@ -18,9 +21,16 @@ const contentHash = (s: string): string => createHash('sha256').update(s).digest
  *
  * Answers kimi's 2026-07-31 question ("when content is identical but scoring generations
  * differ, which copy wins?"). The answer this file implements is KEEP-FIRST, because the
- * guard no-ops the re-capture, and keep-first is the only option that preserves `ts` — the
- * row's first-seen time is real provenance and a delete+reinsert would destroy it to save a
- * re-derivable score.
+ * guard no-ops the re-capture, and keep-first is the only option that preserves `ts` — a
+ * delete+reinsert would destroy the first row's timestamp to save a re-derivable score.
+ *
+ * CORRECTION (CBP, 2026-07-31, forum/cbp-the-question-your-design-rests-on-…): the ts this
+ * froze was WRITE time, not provenance — observations.ts defaulted to datetime('now') and no
+ * caller supplied it, so keep-first was freezing RACE ORDER (whichever ingest ran first) and
+ * an earlier version of this comment called that "real provenance". As of the captureContext
+ * ts thread-through (same day), the freeze is of the event's own timestamp on every path whose
+ * source carries one (transcript turns); on live-hook paths (user_prompt / decision / failure)
+ * write time IS event time, so the claim now holds everywhere it is used.
  *
  * Keep-first has a real cost, which is what this constant is for: the surviving row's SNARC
  * vector is frozen at whichever generation saw the content first. Without a version stamp
@@ -87,10 +97,23 @@ export class SNARCMemory {
   private buffer: CircularBuffer;
   private scorer: SNARCScorer;
   private sessionId: string = '';
+  private claims: RootClaims | null = null;
+  private claimStmts: ClaimStatements | null = null;
 
   constructor(dbPath?: string) {
-    this.db = openDatabase(dbPath);
+    const resolvedPath = dbPath || getDbPath();
+    this.db = openDatabase(resolvedPath);
     this.stmts = prepareStatements(this.db);
+    // Root claim store (cross-shard authority, db.ts). Failure to open = no root, NOT
+    // an error: capture falls back to the per-shard guard, which is the pre-root
+    // behaviour. An authority that can take capture down is a single point of failure.
+    try {
+      this.claims = openRootClaims(resolvedPath);
+      this.claimStmts = this.claims ? prepareClaimStatements(this.claims.db) : null;
+    } catch {
+      this.claims = null;
+      this.claimStmts = null;
+    }
     this.buffer = new CircularBuffer(50);
     this.scorer = new SNARCScorer(this.stmts, this.buffer);
   }
@@ -184,8 +207,14 @@ export class SNARCMemory {
    * capture model (dp 2026-07-01): snarc records WHY (decisions / user instructions) + what FAILED (the
    * learning signal), NOT raw tool telemetry — hestia owns the tool log. `kind`: user_prompt | decision
    * | failure. Returns false if there's nothing to store (empty/deduped).
+   *
+   * `ts` (optional): the EVENT's own timestamp, when the caller parsed one (transcript turns,
+   * conversation-capture.ts:67/70/87). Until 2026-07-31 that value was parsed and then died at
+   * this signature, so observations.ts was always WRITE time and keep-first froze ingest race
+   * order while calling it provenance (CBP's falsification). Live-hook callers pass nothing —
+   * for a hook firing on the event, write time IS event time.
    */
-  captureContext(kind: string, text: string, cwd: string, salience = 0.8): boolean {
+  captureContext(kind: string, text: string, cwd: string, salience = 0.8, ts?: string): boolean {
     const summary = summarize(text, 800);   // context carries meaning — keep more than tool telemetry (300)
     if (!summary.trim()) return false;
     // Idempotent re-capture: if this exact context is already in the STORE, no-op.
@@ -201,14 +230,41 @@ export class SNARCMemory {
     // never consults this guard, so nothing legitimately-repeated is at risk. See db.ts.
     const hash = contentHash(kind + '\x00' + summary);
     if (this.stmts.existsContentHash.get(hash)) return false;
+
+    // Root claim (cross-shard authority). The per-shard guard above cannot see the leak
+    // measured 2026-07-31: one transcript first-written into TWO shards eight minutes apart
+    // (12,606 shared hashes, both shards internally perfect). The claim is one atomic
+    // INSERT OR IGNORE — no check-then-insert race across writers. Denials are RECORDED
+    // (claim_conflict, CBP's amendment), never silently dropped: the denial row is what
+    // makes the pointer-row decision a query and a later re-attribution pass a join.
+    if (this.claims && this.claimStmts) {
+      try {
+        const claimed = this.claimStmts.claimSeen.run(hash, this.claims.shard, ts ?? null);
+        if (claimed.changes === 0) {
+          const owner = this.claimStmts.getSeenOwner.get(hash) as { first_shard: string } | undefined;
+          if (owner && owner.first_shard !== this.claims.shard) {
+            this.claimStmts.recordConflict.run(hash, this.claims.shard, this.sessionId || null, ts ?? null);
+            return false;
+          }
+          // Owner IS this shard but the shard holds no row (fast path above missed):
+          // the crash window — root claimed, process died before the shard stored. A
+          // retry must heal it, not lose the event forever. Fall through and store.
+        }
+      } catch {
+        // Root failure must never take capture down — store and let the per-shard
+        // guard be the authority, which is the pre-root behaviour (see openRootClaims).
+      }
+    }
+
     const tags = extractTags(kind, summary, '');
     const conflict = kind === 'failure' ? 0.9 : 0.1;   // failures are the surprise/conflict signal
-    this.stmts.insertObservation.run(
+    this.stmts.insertObservationTs.run(
       this.sessionId, kind, summary, '',
       0.5, 0.7, salience, salience, conflict,   // surprise, novelty, arousal, reward, conflict (nominal)
       salience, salience,                        // salience, base_salience — forced high (salient by construction)
       cwd, JSON.stringify(tags),
       hash, SCORER_VERSION,
+      ts ?? null,
     );
     return true;
   }
@@ -478,6 +534,7 @@ export class SNARCMemory {
 
   close(): void {
     this.db.close();
+    try { this.claims?.db.close(); } catch { /* already closed */ }
   }
 }
 

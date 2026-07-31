@@ -6,7 +6,7 @@
 import Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
 import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { homedir } from 'node:os';
 
 const SNARC_ROOT = join(homedir(), '.snarc');
@@ -229,6 +229,82 @@ CREATE TABLE IF NOT EXISTS retrieval_log (
 CREATE INDEX IF NOT EXISTS idx_retrieval_unscored ON retrieval_log(relevant, surfaced_ts);
 `;
 
+/**
+ * Root claim store — `<root>/seen.db`, the CROSS-SHARD authority (kimi's design,
+ * forum/kimi-the-leak-is-two-first-writes-…-2026-07-31.md §4; CBP's acceptance and
+ * claim_conflict amendment, forum/cbp-the-question-your-design-rests-on-…-2026-07-31.md §4).
+ *
+ * The per-shard guard (existsContentHash) cannot see cross-shard duplication by
+ * construction: this morning's measured leak was one transcript's 12,606 events
+ * first-written into TWO shards eight minutes apart, each shard internally perfect.
+ * `seen` claims each content hash globally exactly once (INSERT OR IGNORE is atomic —
+ * the check and the insert are one statement, so there is no cross-writer race);
+ * `claim_conflict` records every DENIED claim (CBP's amendment): the claim table
+ * remembers hash → first_shard but not who was denied, and without this row the
+ * pointer-row decision can never become a query and a later re-attribution pass has
+ * nothing to join against.
+ */
+const ROOT_CLAIMS_SCHEMA = `
+CREATE TABLE IF NOT EXISTS seen (
+  content_hash TEXT PRIMARY KEY,
+  first_shard  TEXT NOT NULL,
+  first_ts     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS claim_conflict (
+  content_hash TEXT NOT NULL,
+  shard        TEXT NOT NULL,   -- the shard whose write was DENIED
+  session_id   TEXT,            -- the denied write's session (the decidable question's key column)
+  ts           TEXT NOT NULL DEFAULT (datetime('now')),  -- denied event's own ts when the caller has one
+  PRIMARY KEY (content_hash, shard)
+) WITHOUT ROWID;
+`;
+
+export interface RootClaims {
+  db: Database.Database;
+  shard: string;  // this store's shard id (the projects/<hash> directory name)
+}
+
+/**
+ * Open the root claim store for a shard database path, or return null when the path
+ * is not a shard (`<root>/projects/<hash>/*.db`) — standalone stores (tests, explicit
+ * paths) keep the per-shard guard as their only authority, exactly as before.
+ * Callers MUST treat a throw as "no root" and fall back to per-shard behaviour:
+ * the root is an authority, not a single point of failure (the 2026-06-27→07-01
+ * fleet-wide capture death is the cited precedent for what a storage-layer throw
+ * does to every hook).
+ */
+export function openRootClaims(shardDbPath: string): RootClaims | null {
+  const shardDir = dirname(shardDbPath);
+  if (basename(dirname(shardDir)) !== 'projects') return null;
+  const rootDir = dirname(dirname(shardDir));
+  const db = new Database(join(rootDir, 'seen.db'));
+  db.pragma('journal_mode = WAL');
+  db.pragma('busy_timeout = 2000'); // hooks on two shards can claim in the same second
+  db.exec(ROOT_CLAIMS_SCHEMA);
+  return { db, shard: basename(shardDir) };
+}
+
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
+export function prepareClaimStatements(db: Database.Database) {
+  return {
+    // Atomic claim-first: inserted -> the event is ours to store; 0 changes -> denied.
+    claimSeen: db.prepare(`
+      INSERT OR IGNORE INTO seen (content_hash, first_shard, first_ts)
+      VALUES (?, ?, COALESCE(datetime(?), datetime('now')))
+    `),
+    getSeenOwner: db.prepare(`SELECT first_shard FROM seen WHERE content_hash = ?`),
+    // Record the denial (CBP's amendment) — never silently. INSERT OR IGNORE: a repeated
+    // denial from the same shard is the same fact, not a new one.
+    recordConflict: db.prepare(`
+      INSERT OR IGNORE INTO claim_conflict (content_hash, shard, session_id, ts)
+      VALUES (?, ?, ?, COALESCE(datetime(?), datetime('now')))
+    `),
+  };
+}
+
+export type ClaimStatements = ReturnType<typeof prepareClaimStatements>;
+
 export function openDatabase(path?: string): Database.Database {
   const dbPath = path || getDbPath();
 
@@ -319,6 +395,21 @@ export function prepareStatements(db: Database.Database) {
         surprise, novelty, arousal, reward, conflict, salience, base_salience, cwd, tags,
         content_hash, scored_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `),
+
+    // Same insert WITH the event's own timestamp. Kept as a second statement rather
+    // than widening insertObservation's arity: a published gauge
+    // (scripts/acceptance_pattern_accumulator.mjs seed()) binds the 15-parameter form,
+    // and re-running it against a pre-migration tree must still fail on behaviour,
+    // not on arity. ts is the event time the CALLER parsed (transcript timestamp);
+    // COALESCE keeps garbage/absent values at write time, and datetime() normalizes
+    // ISO 'T…Z' to the column's existing 'YYYY-MM-DD HH:MM:SS' so ORDER BY ts stays
+    // lexicographic across both writers.
+    insertObservationTs: db.prepare(`
+      INSERT INTO observations (session_id, tool_name, input_summary, output_summary,
+        surprise, novelty, arousal, reward, conflict, salience, base_salience, cwd, tags,
+        content_hash, scored_by, ts)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(datetime(?), datetime('now')))
     `),
 
     // STORE-scoped, not session-scoped. The session predicate was dropped 2026-07-31.
