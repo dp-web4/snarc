@@ -4,7 +4,7 @@
  * Must complete in <5 seconds. No LLM calls.
  */
 
-import { EngramMemory } from '../../src/memory.js';
+import { SNARCMemory } from '../../src/memory.js';
 import { getDbPath } from '../../src/db.js';
 import { resolveProjectRoot } from '../lib/project-root.js';
 
@@ -47,7 +47,7 @@ async function main() {
     const failed = exitCode !== undefined && exitCode !== 0;
     if (failed) {
       const projectRoot = resolveProjectRoot(cwd);
-      const memory = new EngramMemory(getDbPath(projectRoot));
+      const memory = new SNARCMemory(getDbPath(projectRoot));
       memory.initSession(sessionId, projectRoot);
       memory.captureContext('failure',
         `${toolName} FAILED (exit ${exitCode}): ${toolInput.slice(0, 200)} → ${toolOutput.slice(0, 400)}`,

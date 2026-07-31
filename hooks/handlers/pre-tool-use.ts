@@ -9,7 +9,7 @@
  */
 import { openSync, readSync, closeSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { EngramMemory } from '../../src/memory.js';
+import { SNARCMemory } from '../../src/memory.js';
 import { getDbPath } from '../../src/db.js';
 import { resolveProjectRoot } from '../lib/project-root.js';
 
@@ -61,7 +61,7 @@ async function main() {
     if (reasoning.length < 40) { process.exit(0); return; }   // trivial / no real decision text
 
     const projectRoot = resolveProjectRoot(cwd);
-    const memory = new EngramMemory(getDbPath(projectRoot));
+    const memory = new SNARCMemory(getDbPath(projectRoot));
     memory.initSession(sessionId, projectRoot);
     // DEDUP: a chain of tools shares one reasoning block → capture once (hash in the settings table).
     const hash = createHash('sha256').update(reasoning).digest('hex').slice(0, 16);

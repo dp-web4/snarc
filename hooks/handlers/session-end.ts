@@ -4,7 +4,7 @@
  * Gets 30 seconds — enough for heuristic pattern extraction.
  */
 
-import { EngramMemory } from '../../src/memory.js';
+import { SNARCMemory } from '../../src/memory.js';
 import { getDbPath } from '../../src/db.js';
 import { resolveProjectRoot } from '../lib/project-root.js';
 import { deepConsolidate } from '../../src/deep-consolidation.js';
@@ -22,7 +22,7 @@ async function main() {
     const sessionId = data.session_id || process.env.SESSION_ID || 'unknown';
     const projectRoot = resolveProjectRoot(data.cwd || process.cwd());
 
-    const memory = new EngramMemory(getDbPath(projectRoot));
+    const memory = new SNARCMemory(getDbPath(projectRoot));
     memory.initSession(sessionId);
 
     const parts = [];

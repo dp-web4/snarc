@@ -2,14 +2,14 @@
 /**
  * UserPromptSubmit hook — check if the user's prompt relates to past memories.
  *
- * Extracts keywords from the prompt, searches engram, and injects
+ * Extracts keywords from the prompt, searches snarc, and injects
  * related observations via the `additionalContext` JSON field.
  *
  * Only fires when there's a relevant match — most prompts pass through silently.
  * Keeps injection under ~200 tokens to avoid context bloat.
  */
 
-import { EngramMemory } from '../../src/memory.js';
+import { SNARCMemory } from '../../src/memory.js';
 import { getDbPath } from '../../src/db.js';
 import { resolveProjectRoot } from '../lib/project-root.js';
 
@@ -25,7 +25,7 @@ async function main() {
     const cwd = data.cwd || process.cwd();
     const sessionId = data.session_id || process.env.SESSION_ID || 'unknown';
     const projectRoot = resolveProjectRoot(cwd);
-    const memory = new EngramMemory(getDbPath(projectRoot));
+    const memory = new SNARCMemory(getDbPath(projectRoot));
     memory.initSession(sessionId, projectRoot);
 
     // CAPTURE the user's instruction — the highest-value context and the primary drift-guard: decisions

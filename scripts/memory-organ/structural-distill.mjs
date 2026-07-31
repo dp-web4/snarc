@@ -1,7 +1,7 @@
-// Memory-organ distill: gitnexus structural facts -> engram, so facet-aware
+// Memory-organ distill: gitnexus structural facts -> snarc, so facet-aware
 // recall (findRelated) can surface them woven with episodic memory.
 // Source: gitnexus eval-server (POST /tool/cypher — its own kuzu/ladybug backend).
-// Sink: the shared engram DB for this workspace.
+// Sink: the shared snarc DB for this workspace.
 //
 // Portable: imports resolve relative to this file (snarc/scripts/memory-organ/).
 // Run from anywhere; pass the workspace root as argv[2] (default: cwd). The
@@ -12,10 +12,10 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 const HERE = dirname(fileURLToPath(import.meta.url));
-const { EngramMemory } = await import(resolve(HERE, '../../dist/src/memory.js'));
+const { SNARCMemory } = await import(resolve(HERE, '../../dist/src/memory.js'));
 const { getDbPath } = await import(resolve(HERE, '../../dist/src/db.js'));
 
-const ROOT = process.argv[2] || process.env.ENGRAM_ROOT_DIR || process.cwd();
+const ROOT = process.argv[2] || process.env.SNARC_ROOT_DIR || process.cwd();
 const PORT = process.env.GITNEXUS_EVAL_PORT || 4848;
 const TOPN = 15, SALIENCE = 0.5;
 
@@ -34,7 +34,7 @@ async function cypher(repo, query) {
 
 const health = await (await fetch(`http://127.0.0.1:${PORT}/health`)).json();
 const repos = health.repos || [];
-const mem = new EngramMemory(getDbPath(ROOT));
+const mem = new SNARCMemory(getDbPath(ROOT));
 mem.initSession('structural-distill', ROOT);
 
 let written = 0; const perRepo = {};

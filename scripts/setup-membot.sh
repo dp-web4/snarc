@@ -13,7 +13,7 @@
 #   3. Creates initial empty cartridge for this project
 #
 # Usage:
-#   cd /path/to/ai-agents/engram
+#   cd /path/to/ai-agents/snarc
 #   bash scripts/setup-membot.sh
 #
 # To stop: kill $(lsof -t -i :8000)

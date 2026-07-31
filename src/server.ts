@@ -1,5 +1,5 @@
 /**
- * Engram MCP Server — 4 retrieval tools for Claude Code.
+ * SNARC MCP Server — 4 retrieval tools for Claude Code.
  *
  * Tools:
  *   snarc_search   — query across all tiers, ranked by salience
@@ -11,20 +11,20 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { EngramMemory } from './memory.js';
+import { SNARCMemory } from './memory.js';
 import { getDbPath } from './db.js';
 
 // Determine project directory for DB path:
-// 1. ENGRAM_PROJECT_DIR env var (explicit override)
+// 1. SNARC_PROJECT_DIR env var (explicit override)
 // 2. CLI arg: node server.js /path/to/project
-// 3. Fallback: scan ~/.engram/projects/ for most recently modified DB
+// 3. Fallback: scan ~/.snarc/projects/ for most recently modified DB
 //
 // The hooks write to a DB keyed by the project cwd they receive from
 // Claude Code. The MCP server must read the same DB.
 function resolveProjectDb(): string {
   // Single resolver shared with the writers. getDbPath() honors
-  // ENGRAM_PROJECT_ROOT/DIR + walks up from its argument (or the server's cwd,
-  // which Claude Code sets to the workspace root) for an `.engram-root` marker.
+  // SNARC_PROJECT_ROOT/DIR + walks up from its argument (or the server's cwd,
+  // which Claude Code sets to the workspace root) for an `.snarc-root` marker.
   // Reader and hooks now resolve identically. The old "newest-modified DB" scan
   // — which read whichever unrelated project was touched last — is removed: it
   // was a heuristic proxy for "which project is this", and it guessed wrong on
@@ -32,7 +32,7 @@ function resolveProjectDb(): string {
   return getDbPath(process.argv[2]);
 }
 
-const memory = new EngramMemory(resolveProjectDb());
+const memory = new SNARCMemory(resolveProjectDb());
 
 const server = new Server(
   { name: 'snarc', version: '0.3.0' },
@@ -43,7 +43,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: 'snarc_search',
-      description: 'Search engram memory across all tiers — observations, patterns, and identity. Results ranked by salience and tier.',
+      description: 'Search snarc memory across all tiers — observations, patterns, and identity. Results ranked by salience and tier.',
       inputSchema: {
         type: 'object' as const,
         properties: {
@@ -154,7 +154,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         content: [{
           type: 'text',
           text: [
-            '=== Engram Memory Stats ===',
+            '=== SNARC Memory Stats ===',
             `Observations (Tier 1): ${stats.observations}`,
             `Patterns (Tier 2):     ${stats.patterns}`,
             `Identity (Tier 3):     ${stats.identityFacts}`,

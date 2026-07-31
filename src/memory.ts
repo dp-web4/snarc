@@ -59,7 +59,7 @@ const STOP_TOKENS = new Set([
   'true', 'false', 'null', 'none', 'name', 'type', 'text', 'value', 'data', 'file', 'line',
 ]);
 
-export class EngramMemory {
+export class SNARCMemory {
   private db: Database.Database;
   private stmts: Statements;
   private buffer: CircularBuffer;

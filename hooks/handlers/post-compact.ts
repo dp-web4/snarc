@@ -11,7 +11,7 @@
  * Heuristic consolidation is <100ms.
  */
 
-import { EngramMemory } from '../../src/memory.js';
+import { SNARCMemory } from '../../src/memory.js';
 import { getDbPath } from '../../src/db.js';
 import { resolveProjectRoot } from '../lib/project-root.js';
 
@@ -26,7 +26,7 @@ async function main() {
     const sessionId = data.session_id || process.env.SESSION_ID || 'compact';
     const projectRoot = resolveProjectRoot(data.cwd || process.cwd());
 
-    const memory = new EngramMemory(getDbPath(projectRoot));
+    const memory = new SNARCMemory(getDbPath(projectRoot));
     memory.initSession(sessionId);
 
     // Run heuristic dream cycle — consolidate what we've seen so far

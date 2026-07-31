@@ -4,7 +4,7 @@ Salience-gated memory for Claude Code.
 
 Captures what matters, forgets what doesn't, consolidates patterns while sleeping.
 
-> Formerly "engram" — renamed to SNARC to avoid collision with an existing project. SNARC is the mechanism itself: **S**urprise, **N**ovelty, **A**rousal, **R**eward, **C**onflict.
+> Formerly "snarc" — renamed to SNARC to avoid collision with an existing project. SNARC is the mechanism itself: **S**urprise, **N**ovelty, **A**rousal, **R**eward, **C**onflict.
 
 ## What's new (v0.3.x)
 
@@ -227,8 +227,8 @@ Stop hook (dream cycle)
 
 Each launch directory gets its own isolated database:
 ```
-~/.engram/projects/<hash>/engram.db    # observations, patterns, identity, settings
-~/.engram/projects/<hash>/meta.json    # maps hash → directory path
+~/.snarc/projects/<hash>/snarc.db    # observations, patterns, identity, settings
+~/.snarc/projects/<hash>/meta.json    # maps hash → directory path
 ```
 
 Same pattern as Claude Code's `-c` flag: project context is scoped to where you launched from. Working on project A won't surface project B's patterns.

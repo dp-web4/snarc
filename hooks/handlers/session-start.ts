@@ -9,7 +9,7 @@
  * SNARC's FTS5 keyword results. Labels source for comparison.
  */
 
-import { EngramMemory } from '../../src/memory.js';
+import { SNARCMemory } from '../../src/memory.js';
 import { getDbPath } from '../../src/db.js';
 import { resolveProjectRoot } from '../lib/project-root.js';
 import { membotDualSearch, membotEnsureMounted } from '../../src/membot-bridge.js';
@@ -23,7 +23,7 @@ async function main() {
   const projectHash = createHash('sha256').update(projectRoot).digest('hex').slice(0, 12);
 
   try {
-    const memory = new EngramMemory(getDbPath(projectRoot));
+    const memory = new SNARCMemory(getDbPath(projectRoot));
     memory.initSession(sessionId, projectRoot);
 
     // Generate session briefing from past memories (SNARC FTS5)

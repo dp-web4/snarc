@@ -1,6 +1,6 @@
 /**
  * SQLite storage layer — schema, queries, lifecycle.
- * Single database at ~/.engram/engram.db
+ * Single database at ~/.snarc/snarc.db
  */
 
 import Database from 'better-sqlite3';
@@ -9,12 +9,12 @@ import { mkdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 
-const ENGRAM_ROOT = join(homedir(), '.engram');
+const SNARC_ROOT = join(homedir(), '.snarc');
 
 /**
  * Resolve the workspace root that keys the DB. Precedence:
- *  1. ENGRAM_PROJECT_ROOT / ENGRAM_PROJECT_DIR env (explicit override).
- *  2. Nearest ancestor containing an `.engram-root` marker — the EXPLICIT
+ *  1. SNARC_PROJECT_ROOT / SNARC_PROJECT_DIR env (explicit override).
+ *  2. Nearest ancestor containing an `.snarc-root` marker — the EXPLICIT
  *     workspace root that consolidates multiple repos (each has its own
  *     CLAUDE.md/.git and would otherwise shard the store across repos).
  *  3. The directory itself — legacy per-directory behavior, unchanged when
@@ -23,11 +23,11 @@ const ENGRAM_ROOT = join(homedir(), '.engram');
  * server (reader), so they can no longer disagree on which DB is "the project".
  */
 function resolveWorkspaceDir(start: string): string {
-  const envRoot = process.env.ENGRAM_PROJECT_ROOT || process.env.ENGRAM_PROJECT_DIR;
+  const envRoot = process.env.SNARC_PROJECT_ROOT || process.env.SNARC_PROJECT_DIR;
   if (envRoot) return envRoot;
   let dir = start;
   for (;;) {
-    try { if (existsSync(join(dir, '.engram-root'))) return dir; } catch { /* ignore */ }
+    try { if (existsSync(join(dir, '.snarc-root'))) return dir; } catch { /* ignore */ }
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -38,12 +38,12 @@ function resolveWorkspaceDir(start: string): string {
 /**
  * Derive a per-directory database path from the launch directory.
  * Same pattern as Claude Code's -c flag: each project directory gets
- * its own isolated context. Structure: ~/.engram/projects/<hash>/engram.db
+ * its own isolated context. Structure: ~/.snarc/projects/<hash>/snarc.db
  */
 export function getDbPath(launchDir?: string): string {
   const dir = resolveWorkspaceDir(launchDir || process.cwd());
   const hash = createHash('sha256').update(dir).digest('hex').slice(0, 12);
-  const projectDir = join(ENGRAM_ROOT, 'projects', hash);
+  const projectDir = join(SNARC_ROOT, 'projects', hash);
   mkdirSync(projectDir, { recursive: true });
   // Write a metadata file so we can map hash → directory
   const metaPath = join(projectDir, 'meta.json');
@@ -53,7 +53,7 @@ export function getDbPath(launchDir?: string): string {
       writeFileSync(metaPath, JSON.stringify({ dir, hash, created: new Date().toISOString() }));
     }
   } catch { /* non-critical */ }
-  return join(projectDir, 'engram.db');
+  return join(projectDir, 'snarc.db');
 }
 
 const SCHEMA = `

@@ -4,9 +4,9 @@
  * Tier 0 and 1 are machine-local (raw, session-specific).
  */
 
-import { EngramMemory } from './memory.js';
+import { SNARCMemory } from './memory.js';
 
-export function exportMarkdown(memory: EngramMemory): string {
+export function exportMarkdown(memory: SNARCMemory): string {
   const patterns = memory.getPatterns();
   const identity = memory.getIdentity();
   const stats = memory.getStats();
@@ -60,7 +60,7 @@ export function exportMarkdown(memory: EngramMemory): string {
   return lines.join('\n');
 }
 
-export function importMarkdown(memory: EngramMemory, markdown: string): { imported: number } {
+export function importMarkdown(memory: SNARCMemory, markdown: string): { imported: number } {
   // Simple parser — extract identity facts and pattern summaries
   let imported = 0;
   const lines = markdown.split('\n');

@@ -88,7 +88,7 @@ export async function deepConsolidate(
   const prompt = PROMPT_TEMPLATE + obsText + '\n\nRespond with ONLY a JSON array. No markdown, no explanation.';
 
   // Write prompt to temp file and pass via stdin — avoids shell escaping issues
-  const tmpFile = join(tmpdir(), `engram-dream-${Date.now()}.txt`);
+  const tmpFile = join(tmpdir(), `snarc-dream-${Date.now()}.txt`);
   let response: string;
   try {
     writeFileSync(tmpFile, prompt);

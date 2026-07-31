@@ -9,7 +9,7 @@
  * Must be fast + silent-fail — never block compaction.
  */
 
-import { EngramMemory } from '../../src/memory.js';
+import { SNARCMemory } from '../../src/memory.js';
 import { getDbPath } from '../../src/db.js';
 import { resolveProjectRoot } from '../lib/project-root.js';
 import { captureConversationTurns } from '../../src/conversation-capture.js';
@@ -44,7 +44,7 @@ async function main() {
     const cwd = data.cwd || process.cwd();
 
     if (transcriptPath) {
-      const memory = new EngramMemory(getDbPath(resolveProjectRoot(cwd)));
+      const memory = new SNARCMemory(getDbPath(resolveProjectRoot(cwd)));
       memory.initSession(sessionId);
       const r = captureConversationTurns(memory, transcriptPath, cwd, sessionId);
       await dreamSinceLast(memory, sessionId);   // DREAM before context is dropped

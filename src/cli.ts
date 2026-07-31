@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * Engram CLI
+ * SNARC CLI
  *
  * Usage:
- *   engram stats          — memory health dashboard
+ *   snarc stats          — memory health dashboard
  *   snarc search <query> — search across all tiers
  *   snarc patterns       — list consolidated patterns
  *   snarc export         — dump Tier 2+3 to markdown (stdout)
  *   snarc dream          — trigger manual consolidation
  */
 
-import { EngramMemory } from './memory.js';
+import { SNARCMemory } from './memory.js';
 import { exportMarkdown } from './export.js';
 import { getDbPath } from './db.js';
 import { deepConsolidate } from './deep-consolidation.js';
@@ -18,7 +18,7 @@ import { deepConsolidate } from './deep-consolidation.js';
 const cmd = process.argv[2];
 const args = process.argv.slice(3);
 
-const memory = new EngramMemory();
+const memory = new SNARCMemory();
 
 async function main() {
   switch (cmd) {
@@ -47,7 +47,7 @@ async function main() {
 
     case 'search': {
       const query = args.join(' ');
-      if (!query) { console.error('Usage: engram search <query>'); process.exit(1); }
+      if (!query) { console.error('Usage: snarc search <query>'); process.exit(1); }
       const results = memory.search(query, 20);
       if (results.length === 0) { console.log('No memories found.'); break; }
       for (const r of results) {
@@ -153,8 +153,8 @@ async function main() {
       const key = args[1];
       const value = args.slice(2).join(' ');
       if (!id || !key || !value) {
-        console.error('Usage: engram promote <id> "<key>" "<value>"');
-        console.error('Example: engram promote 42 "test_framework" "Jest"');
+        console.error('Usage: snarc promote <id> "<key>" "<value>"');
+        console.error('Example: snarc promote 42 "test_framework" "Jest"');
         process.exit(1);
       }
       memory.promoteIdentity(id, key, value);
@@ -165,7 +165,7 @@ async function main() {
     case 'reject': {
       const id = parseInt(args[0]);
       if (!id) {
-        console.error('Usage: engram reject <id>');
+        console.error('Usage: snarc reject <id>');
         process.exit(1);
       }
       memory.rejectIdentity(id);

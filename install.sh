@@ -1,11 +1,11 @@
 #!/bin/bash
-# engram install script
+# snarc install script
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "Installing engram — salience-gated memory for Claude Code"
+echo "Installing snarc — salience-gated memory for Claude Code"
 echo ""
 
 NODE_VERSION=$(node -v 2>/dev/null | sed 's/v//' | cut -d. -f1)
@@ -22,7 +22,7 @@ npx tsc 2>&1 | tail -3
 
 if [ -f "dist/src/server.js" ] && [ -f "dist/hooks/handlers/post-tool-use.js" ]; then
     echo ""
-    echo "engram installed successfully."
+    echo "snarc installed successfully."
     echo ""
     echo "What happens next:"
     echo "  - SessionStart: injects memory briefing into Claude's context"
@@ -31,8 +31,8 @@ if [ -f "dist/src/server.js" ] && [ -f "dist/hooks/handlers/post-tool-use.js" ];
     echo "  - After compaction: mid-session dream cycle + re-inject"
     echo "  - Session end: consolidation (heuristic + optional deep dream)"
     echo ""
-    echo "CLI: engram stats | search | patterns | dream [--deep] | review | config"
-    echo "Data: ~/.engram/projects/<hash>/engram.db (per launch directory)"
+    echo "CLI: snarc stats | search | patterns | dream [--deep] | review | config"
+    echo "Data: ~/.snarc/projects/<hash>/snarc.db (per launch directory)"
 else
     echo "Error: Build failed — dist/ files not found"
     exit 1

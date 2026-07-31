@@ -31,7 +31,7 @@ export interface TranscriptTurn {
   ts?: string;
 }
 
-/** Minimal surface of EngramMemory this module needs — avoids a circular import. */
+/** Minimal surface of SNARCMemory this module needs — avoids a circular import. */
 export interface MemoryLike {
   capture(toolName: string, input: string, output: string, cwd: string, exitCode?: number): unknown;
   captureContext(kind: string, text: string, cwd: string, salience?: number): boolean;

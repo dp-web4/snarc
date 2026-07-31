@@ -1,14 +1,14 @@
 /**
  * Resolve the project root from any subdirectory.
  *
- * Uses ENGRAM_PROJECT_ROOT env var if set (most reliable).
+ * Uses SNARC_PROJECT_ROOT env var if set (most reliable).
  * Otherwise walks up from `startDir` looking for a standing-law marker
  * (CLAUDE.md or AGENTS.md — the latter is what non-Claude harnesses like Kimi
  * use), then .git. Stops walking at the first .git to avoid crossing into
  * parent repos.
  *
  * This prevents subdirectory cwd values (from Bash tool cd) from
- * splitting observations across multiple engram databases.
+ * splitting observations across multiple snarc databases.
  */
 
 import { existsSync, readdirSync } from 'node:fs';
@@ -16,8 +16,8 @@ import { dirname, join, resolve } from 'node:path';
 
 export function resolveProjectRoot(startDir: string): string {
   // Explicit env var takes priority
-  if (process.env.ENGRAM_PROJECT_ROOT) {
-    return process.env.ENGRAM_PROJECT_ROOT;
+  if (process.env.SNARC_PROJECT_ROOT) {
+    return process.env.SNARC_PROJECT_ROOT;
   }
 
   let dir = resolve(startDir);
