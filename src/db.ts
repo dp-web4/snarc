@@ -5,7 +5,7 @@
 
 import Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
-import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdirSync, existsSync, writeFileSync, readdirSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -304,6 +304,128 @@ export function openRootClaims(shardDbPath: string): RootClaims | null {
   } catch { /* already migrated */ }
   return { db, shard: basename(shardDir) };
 }
+
+export interface BackfillPlan {
+  shards: { shard: string; hashed: number; claimed: number; conflicted: number }[];
+  totalHashed: number;
+  totalClaimed: number;
+  totalConflicted: number;
+  dryRun: boolean;
+}
+
+/**
+ * Seed the root claim store from the shards that already exist — the migration
+ * `openRootClaims` deliberately does NOT perform on its own.
+ *
+ * WHY THIS IS NEEDED, measured 2026-07-31 rather than argued. The authority guards
+ * *new* content: `captureContext`'s per-shard `existsContentHash` returns early on
+ * anything the shard already holds, so only a first-sighting ever reaches `claimSeen`.
+ * A fresh `seen.db` therefore knows nothing about the corpus already on disk, and the
+ * corpus already on disk is where the entire leak lives:
+ *
+ *   12,659 content hashes present in EXACTLY the same four shards
+ *   (23094633bebc, 777c4901744b, 791cace57ce9, 7d210ad7238a) — one transcript corpus written
+ *   four times over. In the one shard holding both populations, every duplicated row has a
+ *   lower AUTOINCREMENT id than every hash claimed since go-live (12,726 < 12,729): the whole
+ *   duplicated corpus was written before the authority made its first claim.
+ *
+ *   Ordering, not timestamps, on purpose. `observations.ts` is write time before c48af34 and
+ *   the event's own transcript time after, mixed in one column, and seen.first_ts is
+ *   COALESCE(event ts, now) — so a ts comparison between them dates nothing. A first draft of
+ *   this note quoted a "2m59s" gap off exactly that comparison and was wrong.
+ *
+ * The consequence is behavioural, and acceptance_claim_recurrence.mjs check 1 asserts it:
+ * a replay of that same corpus into a FIFTH shard is not denied, because `seen` holds only
+ * the hashes claimed since go-live. Without this backfill the authority is inert against
+ * its own motivating incident — not because the design is wrong, but because it starts empty.
+ *
+ * WHAT THIS DOES NOT DECIDE. Ownership is assigned by iteration order over the shards, and
+ * for the 12,659 that is arrival order over rows whose `event_session_id` is empty — i.e. the
+ * attribution decision itself wearing a migration's coat (CBP §4c). That is why `dryRun` is
+ * the default at every caller: the plan is a measurement, the write is an operator's act.
+ * The recommended sequence remains recover `event_session_id` from the transcripts FIRST
+ * (99.0% recoverable to a unique conversation, controls in audit_claim_conflict_decidability.py),
+ * backfill after. Every hash a second shard also holds is written as a `claim_conflict` row,
+ * so the losing side of each assignment stays a queryable fact rather than a silent overwrite.
+ */
+export function backfillRootClaims(
+  rootDir: string,
+  opts: { dryRun?: boolean; shards?: string[] } = {},
+): BackfillPlan {
+  const dryRun = opts.dryRun !== false;   // default DRY — the write is an explicit act
+  const projectsDir = join(rootDir, 'projects');
+  const db = new Database(join(rootDir, 'seen.db'));
+  db.pragma('journal_mode = WAL');
+  db.pragma('busy_timeout = 2000');
+  db.exec(ROOT_CLAIMS_SCHEMA);
+  try { db.exec(`ALTER TABLE claim_conflict ADD COLUMN event_session_id TEXT`); } catch { /* migrated */ }
+
+  const shards = opts.shards ?? (existsSync(projectsDir) ? readdirSync(projectsDir).sort() : []);
+  const stmts = prepareClaimStatements(db);
+  const plan: BackfillPlan = {
+    shards: [], totalHashed: 0, totalClaimed: 0, totalConflicted: 0, dryRun,
+  };
+
+  // One transaction for the whole run: a half-seeded authority names owners for part of the
+  // corpus and not the rest, which is a worse state than either endpoint.
+  const run = db.transaction(() => {
+    for (const shard of shards) {
+      const shardDb = join(projectsDir, shard, 'snarc.db');
+      if (!existsSync(shardDb)) continue;
+      const src = new Database(shardDb, { readonly: true, fileMustExist: true });
+      let hashed = 0, claimed = 0, conflicted = 0;
+      try {
+        // The live store holds TWO schema generations at once: `event_session_id` landed at
+        // 62009ae and reaches a shard only on its next write, so shards idle since then still
+        // lack the column. Reading it unconditionally throws SQLITE_ERROR and takes the whole
+        // backfill down — on a READ, over shards whose rows are precisely the ones that most
+        // need seeding. Absent column and NULL value mean the same thing here (not knowable),
+        // so detect and substitute rather than requiring a migration pass first.
+        const hasEventSid = (src.prepare(`PRAGMA table_info(observations)`).all() as { name: string }[])
+          .some((c) => c.name === 'event_session_id');
+        const rows = src.prepare(
+          `SELECT content_hash, ts, session_id, ${hasEventSid ? 'event_session_id' : 'NULL AS event_session_id'}
+             FROM observations WHERE content_hash IS NOT NULL ORDER BY id`,
+        ).all() as { content_hash: string; ts: string; session_id: string; event_session_id: string | null }[];
+        for (const r of rows) {
+          hashed++;
+          const res = stmts.claimSeen.run(r.content_hash, shard, r.ts ?? null);
+          if (res.changes === 0) {
+            const owner = stmts.getSeenOwner.get(r.content_hash) as { first_shard: string } | undefined;
+            // Same-shard repeats are not cross-shard denials — a35e3a8's distinction, kept here.
+            if (owner && owner.first_shard !== shard) {
+              stmts.recordConflict.run(
+                r.content_hash, shard, r.session_id ?? null, r.ts ?? null, r.event_session_id ?? null,
+              );
+              conflicted++;
+            }
+          } else {
+            claimed++;
+          }
+        }
+      } finally {
+        src.close();
+      }
+      plan.shards.push({ shard, hashed, claimed, conflicted });
+      plan.totalHashed += hashed;
+      plan.totalClaimed += claimed;
+      plan.totalConflicted += conflicted;
+    }
+    // A dry run does the identical work and then discards it, so the reported plan is the
+    // plan that would execute — not a separate estimator that can drift from the writer.
+    if (dryRun) throw new DryRunRollback();
+  });
+
+  try {
+    run();
+  } catch (e) {
+    if (!(e instanceof DryRunRollback)) { db.close(); throw e; }
+  }
+  db.close();
+  return plan;
+}
+
+class DryRunRollback extends Error {}
 
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 export function prepareClaimStatements(db: Database.Database) {
