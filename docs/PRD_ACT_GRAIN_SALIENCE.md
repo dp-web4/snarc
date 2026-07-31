@@ -23,8 +23,12 @@ On CBP, 2026-07-31, against `~/.engram/projects/791cace57ce9/engram.db`:
 | ~~average salience 0.002~~ | avg **`base_salience` = 0.349** | **STRUCK — decay artifact** |
 | ~~patterns 28 = consolidation collapse~~ | 28 = **26 LLM-pass + 1 tautology + 1 identity** | **STRUCK — mixed provenance** |
 | corpus never seen by the 5-dim scorer | **691,760 / 704,042 = 98.3%** | new |
-| `Conversation` rows with **literal** dimension columns | 409,255 / 689,546 = **59.4%** | new |
-| SNARC's own `tool_sequence` yield | **1 pattern** | new |
+| `Conversation` rows with **literal** dimension columns | 409,255 / 689,546 = **59.4%** | new — second-seated at 58.4% (drift) |
+| distinct values in `conflict`, over 704,049 rows | **5** | new — data-only form of "never scored"; needs no code read |
+| SNARC's own `tool_sequence` yield | **1 pattern** | new — second-seated |
+| ~~pattern relevance 9.0% (`retrieval_log`)~~ | instrument measures token budget + genre; placebo scores the same | **STRUCK — item-blind (defect #4)** |
+| distinct identity items ever surfaced, in 1,225 briefings | **3** of 6, in *every* briefing | new — selector is a constant function (defect #6) |
+| briefings at the exact `slice(0,3)` quota | 1,101 / 1,225 = **89.9%** | new — no tier can abstain (defect #6) |
 | membot store behind search | 0 memories, no cartridge mounted | holds |
 | searches answered from that empty store | 11,153, all returning zero | holds — **bounds the content channel at zero *by construction*; not a utility measurement, see §8.2** |
 | tool rows carrying any `output_summary` | 59 / 12,445 = **0.5%** | new — outcome half uncaptured (defect #5) |
@@ -51,14 +55,19 @@ On CBP, 2026-07-31, against `~/.engram/projects/791cace57ce9/engram.db`:
 single database row: a tool-trajectory extractor, pointed at commentary, converged at maximum
 confidence on a statement carrying zero information. Alongside it:
 
-- **98.3% of the corpus was never scored.** `captureContext` (`memory.ts:165`) bypasses
-  `SNARCScorer.score` entirely, and on 59.4% of `Conversation` rows it writes **literals** into
-  the dimension columns — `surprise=0.5, novelty=0.7, conflict=0.1`, with `arousal` and `reward`
-  both set to the same `scoreConversationTurn` output. Not one of the five is a measurement.
-  (Same defect class as web4's audit `result` field: a column that looks measured, is constant,
-  and is consumed downstream by something that cannot tell.)
+- **The dimension columns carry no per-item information.** `conflict` takes **5 distinct values
+  across 704,049 rows**; `surprise` is two constants covering 100.0%; 92.8% of rows sit in three
+  constant triples, the largest being the literal `surprise=0.5, novelty=0.7, conflict=0.1` at
+  58.4%. The residual tail is `surprise=0.0` with `novelty` at 1/11, 2/11, 1/9, 1/6 — token ratios,
+  one dimension, arithmetic. (Same defect class as web4's audit `result` field: a column that looks
+  measured, is constant, and is consumed downstream by something that cannot tell.) The
+  *mechanism* — `captureContext` (`memory.ts:165`) bypassing `SNARCScorer.score`, hence **98.3%
+  never scored** — rests on a code read and is single-seat; the cardinality above is two-seat and
+  needs no code. Quote the second form.
 - All six identity entries — the most durable tier — are about the memory system's own plumbing:
-  port numbers, marketplace submission, its own launch posts. A year of research is absent.
+  port numbers, marketplace submission, its own launch posts. A year of research is absent. Newest
+  entry `2026-05-20`; the same 3 of the 6 have been surfaced in **every** briefing since 2026-07-04
+  (defect #6).
 - Top-ranked retrievable entries are **context-compaction preambles** at salience 1.000, ten days
   stale, duplicated. A three-term query for a full day's work returns *No memories found*.
 
@@ -222,6 +231,25 @@ Patterns form over **act sequences**, not text clusters. The shapes worth extrac
 This is `micro_consolidation.py`'s question — *what are the causal rules* — asked over tool
 trajectories rather than game trajectories.
 
+**The case against today's consolidation is a production count, not a use rate.** This matters
+because the use rate was tried first and was an artifact:
+
+```
+patterns table, 30 rows
+  deep_insight 11 | deep_workflow 11 | deep_error_fix 5 | deep_decision 1   <- external LLM pass
+  proposed_identity 1
+  tool_sequence 1  "Recurring workflow: Conversation -> Conversation -> Conversation"
+                   confidence 0.900, frequency 43,581,138
+```
+
+SNARC's own extractor has produced **exactly one pattern in the store's lifetime, and it is a
+tautology**; 28 of 30 came from an external LLM pass. That is `SELECT kind, COUNT(*)` — no outcome
+instrument, no control, no power calculation. The earlier argument ("patterns are relevant only 9%
+of the time they are surfaced") required both a working outcome column (defect #4) and a working
+selector (defect #6), had neither, and was voided. The general rule this thread converged on:
+**with the outcome instrument dead, use claims are unavailable and production claims are free** —
+reach for the cheaper question before building the expensive control.
+
 ## 8. The loop that is closed, and transmits nothing
 
 **Every recall records whether it was used, and what happened next.**
@@ -359,23 +387,53 @@ unless something re-indexes the attachments onto the §6 secondary full-text pat
 in scope for the migration and is the same pass as §4's step 1 — the prediction mining walks all
 704k rows anyway, so it is the natural place to emit the attachment index. One pass, two products.
 
-### 10.1 Five standing defects, reported not patched
+### 10.1 Six standing defects, reported not patched
 
-Found by the writer inventory (#1–#3), the outcome-instrument audit (#4), and the holdout sizing
-pass (#5); all five corrupt the existing store and any replay run against it.
+Found by the writer inventory (#1–#3), the outcome-instrument audit (#4), the holdout sizing
+pass (#5), and the selection audit (#6); all six corrupt the existing store and any replay run
+against it.
 
 | # | defect | site | effect |
 |---|---|---|---|
 | 1 | decay decrement reads the column it writes | `db.ts:447` | 7-day cliff to exactly 0.0; no memory older than a week |
 | 2 | `base_salience` backfilled from already-decayed `salience` | `db.ts:232` | every pre-June-2026 tool row permanently unrankable (`memory.ts:209` ranks by it) |
-| 3 | dimension columns written as literals on the bypass path | `memory.ts:176` | 59.4% of `Conversation` rows carry fabricated SNARC scores |
+| 3 | dimension columns carry no per-item information | `memory.ts:176` | `conflict` has **5 distinct values across 704,049 rows**; `surprise` is two constants covering 100.0%; 92.8% of rows sit in three constant triples. Stated this way the defect needs no code read — see below |
 | 4 | retrieval outcome is item-blind | `memory.ts:352-372` | `retrieval_log.relevant` measures token budget and genre, not usefulness; a random other memory scores the same (§8) |
 | 5 | outcome half of the act grain is not captured | writer path | 59/12,445 (0.5%) of tool rows carry any `output_summary`; inputs captured in full. Mismatch is outcome-vs-expectation, so no outcome metric in §8.1 is computable and the holdout cannot be sized (§8.2) |
+| 6 | the selector is a constant function on two of three tiers | `memory.ts:293,304,317` | `slice(0,3)` is a **quota, not a ranking cut**: 89.9% of briefings are exactly (3,3,3), and no tier can abstain. Identity surfaces the same 3 of its 6 rows in every briefing since 2026-07-04 (newest row 2026-05-20). Pattern top-3 = 72.1% of surfacings with the tautology at #1 (n=1,212) against the two substantive operational patterns at 68 and 62 |
+
+**#3's two halves have different evidentiary standing.** The *mechanism* — that `captureContext`
+bypassed the scorer, hence 98.3% never scored — rests on a code read and is single-seat. The
+*consequence* — that the dimensions carry no per-item information — is checkable from value
+cardinality alone and has been independently confirmed (kimi, notice 444 §4 + CBP selection audit).
+Quote the consequence; flag the mechanism as single-seat.
 
 **Do not "fix" #4 by raising the threshold.** The obvious repair — `overlap >= 3` instead of `>= 2` —
 makes the length dependence *stronger*, since clearing a higher fixed bar depends even more on how
 many tokens the item brought. #4 needs a different outcome definition, not a retuned one, and
 `scripts/audit_outcome_instrument.py` is the gate it must pass.
+
+**#4 and #6 are independent, and every per-tier rate needed both to be working.** The cheapest
+demonstration of #4 is free in the store: the identity tier's three constant strings are 26, 28 and
+29 tokens — length held fixed by luck — and score 7.8% / 32.5% / **78.5%**, where the top two are
+near-duplicates *of the same fact*. Content and length held nearly constant, 2.4x the rate; what
+varies is how ambient the item's vocabulary is in the fleet's prose. #6 is what makes the rate
+uninterpretable even if #4 were repaired: a deterministic top-3 over a static 6-row pool returns the
+same three items forever, so "identity is relevant 39.6% of the time" scores a fixed playlist. Two
+gates, failing for unrelated reasons:
+
+- `scripts/audit_outcome_instrument.py` — *can the outcome column see the item?*  (exits 1)
+- `scripts/audit_selection_tier.py` — *is there a selection worth measuring?*  (exits 1)
+
+Both must pass before any per-tier number is quoted. The struck "9% of patterns are relevant" figure
+is what two composed failures look like from the outside: a plausible number that convicted a tier
+neither instrument could see.
+
+**The abstain question, open.** Every metric in §8.1 assumes the briefing is a set of choices. It is
+three slots per kind, always filled. If the selector could abstain, *choosing to surface* would
+become an act with a counterfactual attached and part of §8.2's holdout would fall out of normal
+operation — or it would smuggle an unrandomized confound into production. Unresolved; it gates the
+arm design, so it is argued before ε is chosen, not after.
 
 Note also that #4 interacts with #2 the way #1 does: `estimate` for observations is
 `base_salience ?? salience` (`memory.ts:209`), so for every pre-June row the estimate side of the
@@ -411,7 +469,10 @@ Stated as predictions so they can be wrong:
    non-tautological act-sequence pattern at all*; the 26 `deep_*` entries are not the baseline, since
    they come from a text pass this proposal does not replace.
    **Not measured by `retrieval_log`** — the 9.0% pattern relevance rate is item-blind (§8) and
-   cannot be used to show a new tier does better.
+   cannot be used to show a new tier does better. Nor is it rescued by repairing the outcome column:
+   the pattern tier's rate is also 72.1% carried by three items under a quota that cannot abstain
+   (defect #6). Both gates — `audit_outcome_instrument.py` and `audit_selection_tier.py` — must exit
+   0 before any per-tier rate appears in a criterion.
 3. **A standing defect surfaces unprompted** — e.g. a recurring-mismatch pattern for an endpoint that
    always returns empty.
 4. **Retrieval precedes action**: a situation query before a risky act returns the prior occurrence.
