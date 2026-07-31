@@ -27,11 +27,13 @@ On CBP, 2026-07-31, against `~/.engram/projects/791cace57ce9/engram.db`:
 | distinct values in `conflict`, over 704,049 rows | **5** | new — data-only form of "never scored"; needs no code read |
 | SNARC's own `tool_sequence` yield | **1 pattern** | new — second-seated |
 | ~~pattern relevance 9.0% (`retrieval_log`)~~ | instrument measures token budget + genre; placebo scores the same | **STRUCK — item-blind (defect #4)** |
-| distinct identity items ever surfaced, in 1,225 briefings | **3** of 6, in *every* briefing | new — selector is a constant function (defect #6) |
-| briefings at the exact `slice(0,3)` quota | 1,101 / 1,225 = **89.9%** | new — no tier can abstain (defect #6) |
+| distinct identity items ever surfaced, in 1,217 briefings | **3** of 6, in **1,217 / 1,217** briefings | new — selector is a constant function, zero departures (defect #6) |
+| briefings at the exact `slice(0,3)` quota | **91.0% of slots / 57.1% of distinct items** | new — no tier can abstain (defect #6), and the gap is defect #7 |
+| slots filled by an item already in the same briefing | **522** = 4.9% of all surfacings | new — the quota pads with repeats (defect #7) |
 | membot store behind search | 0 memories, no cartridge mounted | holds |
 | searches answered from that empty store | 11,153, all returning zero | holds — **bounds the content channel at zero *by construction*; not a utility measurement, see §8.2** |
-| tool rows carrying any `output_summary` | 59 / 12,445 = **0.5%** | new — outcome half uncaptured (defect #5) |
+| tool rows carrying any `output_summary` | 58 / 12,310 = **0.5%**, and **all 58 on 2026-07-01** | holds — outcome half uncaptured (defect #5); the other 12,252 hold the *literal string* `""`, so a `trim()=''` test reports this channel 100% healthy |
+| last tool event of any kind | **2026-07-24 02:56:43** | new — the channel a session-grain outcome needs has been silent for a week (defect #5) |
 
 **What the struck numbers actually measured.** Three separate defects, none of them the scorer:
 
@@ -387,11 +389,16 @@ unless something re-indexes the attachments onto the §6 secondary full-text pat
 in scope for the migration and is the same pass as §4's step 1 — the prediction mining walks all
 704k rows anyway, so it is the natural place to emit the attachment index. One pass, two products.
 
-### 10.1 Six standing defects, reported not patched
+### 10.1 Seven standing defects, reported not patched
 
 Found by the writer inventory (#1–#3), the outcome-instrument audit (#4), the holdout sizing
-pass (#5), and the selection audit (#6); all six corrupt the existing store and any replay run
-against it.
+pass (#5), and the selection audit (#6–#7); all seven corrupt the existing store and any replay
+run against it.
+
+**Which store.** Every number below is from `~/.engram/projects/791cace57ce9/engram.db` at ref
+`max(id)=10724`, a store that took its last write **2026-07-31T04:20Z** and will take no more.
+The live store is `~/.snarc/projects/<hash>/snarc.db`, sharded per project, and none of these
+defects has yet been confirmed there. Name the writer, not just the path.
 
 | # | defect | site | effect |
 |---|---|---|---|
@@ -399,8 +406,9 @@ against it.
 | 2 | `base_salience` backfilled from already-decayed `salience` | `db.ts:232` | every pre-June-2026 tool row permanently unrankable (`memory.ts:209` ranks by it) |
 | 3 | dimension columns carry no per-item information | `memory.ts:176` | `conflict` has **5 distinct values across 704,049 rows**; `surprise` is two constants covering 100.0%; 92.8% of rows sit in three constant triples. Stated this way the defect needs no code read — see below |
 | 4 | retrieval outcome is item-blind | `memory.ts:352-372` | `retrieval_log.relevant` measures token budget and genre, not usefulness; a random other memory scores the same (§8) |
-| 5 | outcome half of the act grain is not captured | writer path | 59/12,445 (0.5%) of tool rows carry any `output_summary`; inputs captured in full. Mismatch is outcome-vs-expectation, so no outcome metric in §8.1 is computable and the holdout cannot be sized (§8.2) |
-| 6 | the selector is a constant function on two of three tiers | `memory.ts:293,304,317` | `slice(0,3)` is a **quota, not a ranking cut**: 89.9% of briefings are exactly (3,3,3), and no tier can abstain. Identity surfaces the same 3 of its 6 rows in every briefing since 2026-07-04 (newest row 2026-05-20). Pattern top-3 = 72.1% of surfacings with the tautology at #1 (n=1,212) against the two substantive operational patterns at 68 and 62 |
+| 5 | outcome half of the act grain is not captured | writer path | 58/12,310 (0.5%) of tool rows carry any `output_summary`, **all 58 on 2026-07-01**; the other 12,252 hold the literal string `""` (not NULL, not empty — a `trim()=''` test reads the channel as 100% healthy). Last tool event of any kind: **2026-07-24**. Inputs captured in full. Mismatch is outcome-vs-expectation, so no outcome metric in §8.1 is computable and the holdout cannot be sized (§8.2) |
+| 6 | the selector is a constant function on two of three tiers | `memory.ts:293,304,317` | `slice(0,3)` is a **quota, not a ranking cut**: 91.0% of briefings are exactly (3,3,3) slots, and no tier can abstain. Identity surfaces the same 3 of its 6 rows in **1,217 of 1,217** briefings since 2026-07-04 — zero departures — and pattern is 3 distinct in 1,217/1,217 too (newest identity row 2026-05-20). Pattern top-3 = 72.1% of surfacings with the tautology at #1 (n=1,212) against the two substantive operational patterns at 68 and 62 |
+| 7 | the quota pads with repeats | `memory.ts:317` (observation tier) | the same item can occupy 2–3 of a tier's 3 slots: **522 padded slots, 4.9% of all surfacings**. Observation is 3 *slots* in 91.0% of briefings but 3 *distinct items* in **57.1%** (distinct-per-briefing 3→695, 2→334, 1→147, 0→41). Every "3 items" elsewhere in this document means 3 slots; k_effective is **8.383**, not 9, and per-instance holdout assignment is therefore a variable-dose treatment (§8.1) |
 
 **#3's two halves have different evidentiary standing.** The *mechanism* — that `captureContext`
 bypassed the scorer, hence 98.3% never scored — rests on a code read and is single-seat. The

@@ -13,7 +13,14 @@ alone leaves the other's number uninterpretable.  Three checks, all read-only:
 
   QUOTA       Every briefing takes slice(0,3) per kind (memory.ts:293,304,317).  A tier
               is surfaced whether or not it holds anything worth surfacing, so its
-              surfacing count carries no information about its quality.
+              surfacing count carries no information about its quality.  Counted at
+              DISTINCT-ITEM grain, not slot grain: the same item can occupy 2 or 3 of a
+              tier's 3 slots, so a slot-grain count reports content that is not there.
+
+  CHANNEL     Whether this store can carry the outcome a session-grain design needs at
+              all: tool-event rows, closed sessions, a populated identity tier.  A
+              design that "needs no outcome column" still needs a channel, and a store
+              can be missing the channel while every other check reads normally.
 
   HEADROOM    A deterministic top-3 over a small static pool is a CONSTANT function.
               If a tier surfaces the same k items in every briefing for weeks, its
@@ -49,40 +56,153 @@ DIMS = ('surprise', 'novelty', 'arousal', 'reward', 'conflict')
 
 
 def resolve_db(explicit):
-    """Name the store on every run.  Picking by size would silently select the
-    ~/.engram archive over the live ~/.snarc store for the next several months --
-    'defaults are unstated axes', and this thread has already been bitten by it."""
+    """Name the store on every run, and refuse to pick one silently.
+
+    The previous default preferred ~/.engram over ~/.snarc, which selected a store
+    that stopped taking writes at 2026-07-31T04:20Z -- every number this script
+    printed described a db no longer being written, while the PRD it fed prescribes
+    for the live one.  'Defaults are unstated axes'; the store is the loudest axis
+    here, so it is now an explicit argument."""
     if explicit:
         return explicit
-    for p in ('~/.engram/projects/791cace57ce9/engram.db',
-              '~/.snarc/projects/791cace57ce9/snarc.db'):
-        f = os.path.expanduser(p)
-        if os.path.exists(f):
-            return f
-    sys.exit('no store found; pass --db explicitly')
+    sys.exit('pass --db explicitly: the archive (~/.engram/...) and the live store\n'
+             '(~/.snarc/projects/<hash>/snarc.db) give different answers, and the\n'
+             'live store is sharded per project -- there is no single default.')
+
+
+def print_ref(conn, db):
+    """Pin the reference, not just the path.  'Byte-exact replication' between two
+    seats means nothing unless both saw the same rows; a max(id) makes that checkable
+    instead of assumed."""
+    n, mx = conn.execute("SELECT COUNT(*), MAX(id) FROM retrieval_log").fetchone()
+    lo, hi = conn.execute("SELECT MIN(surfaced_ts), MAX(surfaced_ts) FROM retrieval_log").fetchone()
+    obs = conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
+    print(f"store: {db}")
+    print(f"ref:   retrieval_log rows={n} max(id)={mx} span=[{lo} .. {hi}] observations={obs}")
+    print("       quote this ref beside any number below; two seats agree only if it matches.\n")
+
+
+def briefing_key(rows, tol_secs=2):
+    """Group surfacings into briefings by (cwd, contiguous timestamp run).
+
+    Neither obvious key is correct.  Keying on surfaced_ts alone MERGES two briefings
+    that ran in the same second under different cwds; keying on (surfaced_ts, cwd)
+    SPLITS two briefings whose writes straddled a second boundary.  On this archive the
+    two errors are equal and opposite (2 each), so both keys print a plausible number
+    while misclassifying four briefings between them -- agreement is not correctness.
+    """
+    from datetime import datetime
+    per_cwd = defaultdict(list)
+    for ts, cwd, kind, mk in rows:
+        per_cwd[cwd].append((ts, kind, mk))
+    briefings = {}
+    for cwd, items in per_cwd.items():
+        items.sort()
+        prev, key = None, None
+        for ts, kind, mk in items:
+            t = datetime.strptime(ts, '%Y-%m-%d %H:%M:%S')
+            if prev is None or (t - prev).total_seconds() > tol_secs:
+                key = (cwd, ts)
+                briefings[key] = defaultdict(list)
+            briefings[key][kind].append(mk)
+            prev = t
+    return briefings
 
 
 def check_quota(conn):
     rows = conn.execute(
-        "SELECT surfaced_ts, cwd, item_kind FROM retrieval_log WHERE source='briefing'"
-    ).fetchall()
-    briefings = defaultdict(Counter)
-    for ts, cwd, kind in rows:
-        briefings[(ts, cwd)][kind] += 1
+        "SELECT surfaced_ts, cwd, item_kind, match_key FROM retrieval_log "
+        "WHERE source='briefing'").fetchall()
+    briefings = briefing_key(rows)
     n = len(briefings)
     if not n:
+        print("QUOTA      no briefings in this store")
         return None, []
-    comp = Counter((b['pattern'], b['identity'], b['observation']) for b in briefings.values())
-    (top, top_n), = comp.most_common(1)
-    per_kind = {k: sum(1 for b in briefings.values() if b[k] == 3) / n
-                for k in ('pattern', 'identity', 'observation')}
+    kinds = ('pattern', 'identity', 'observation')
+    slots = Counter(tuple(len(b[k]) for k in kinds) for b in briefings.values())
+    distinct = Counter(tuple(len(set(b[k])) for k in kinds) for b in briefings.values())
+    (s_top, s_n), = slots.most_common(1)
+    (d_top, d_n), = distinct.most_common(1)
+    dup_rows = sum(len(b[k]) - len(set(b[k])) for b in briefings.values() for k in kinds)
+
     print(f"QUOTA      {n} briefings, {len(rows)} item surfacings")
-    print(f"           modal composition (pat,id,obs) = {top} in {top_n} "
-          f"({100 * top_n / n:.1f}%)")
-    for k, share in sorted(per_kind.items()):
-        print(f"           {k:<12} exactly 3 in {100 * share:5.1f}% of briefings")
-    failed = [k for k, s in per_kind.items() if s > MAX_QUOTA_SHARE]
+    print(f"           modal composition (pat,id,obs)")
+    print(f"             slot grain     {s_top} in {100 * s_n / n:5.1f}%")
+    print(f"             DISTINCT grain {d_top} in {100 * d_n / n:5.1f}%   <-- the honest one")
+    if dup_rows:
+        print(f"           {dup_rows} slots filled by an item already in the same briefing "
+              f"({100 * dup_rows / len(rows):.1f}% of all surfacings)")
+    failed = []
+    for k in kinds:
+        s = sum(1 for b in briefings.values() if len(b[k]) == 3) / n
+        d = sum(1 for b in briefings.values() if len(set(b[k])) == 3) / n
+        note = "  <-- padded with repeats" if s - d > 0.05 else ""
+        print(f"           {k:<12} 3 slots {100 * s:5.1f}%   3 distinct {100 * d:5.1f}%{note}")
+        if s > MAX_QUOTA_SHARE:
+            failed.append(k)
     return n, failed
+
+
+def check_channel(conn):
+    """Can this store carry a session-grain outcome at all?
+
+    The randomized-withhold design is identified without the item-blind `relevant`
+    column -- but identification is not instrumentation.  Attempt efficiency is counted
+    over tool events, attributed to sessions, and (for the identity arm) needs the
+    identity tier to be populated.  Each of those is a separate channel that can be
+    empty while the store looks alive."""
+    print("\nCHANNEL    can a session-grain outcome be computed from this store?")
+    failed = []
+    TOOL = "tool_name NOT IN ('Conversation','user_prompt','structural')"
+    total = conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
+    tool, last = conn.execute(
+        f"SELECT COUNT(*), MAX(ts) FROM observations WHERE {TOOL}").fetchone()
+    print(f"           tool-event rows   {tool:>7} of {total} observations, last: {last}")
+    # `output_summary` is the two-character LITERAL '""' on rows with no captured payload,
+    # not NULL and not ''.  A trim()='' test reads those as populated and reports 0% empty
+    # against a channel that is 99.5% dead -- name the encoding, not just the column.
+    payload = conn.execute(
+        f"SELECT COUNT(*) FROM observations WHERE {TOOL} AND LENGTH(output_summary) > 12"
+    ).fetchone()[0]
+    print(f"           with a payload    {payload:>7} "
+          f"({100 * payload / tool if tool else 0:.1f}% of tool events carry an outcome)")
+    if not tool or payload < 0.5 * tool:
+        print("           -> attempt efficiency has no numerator: tool events are recorded "
+              "without their outcome")
+        failed.append('attempt-outcomes')
+    closed, sess = conn.execute(
+        "SELECT SUM(ended_at IS NOT NULL), COUNT(*) FROM sessions").fetchone()
+    closed = closed or 0
+    print(f"           closed sessions   {closed:>7} of {sess} "
+          f"({100 * closed / sess if sess else 0:.1f}%)")
+    if sess and closed / sess < 0.5:
+        print("           -> the session unit does not close: session-grain aggregation is "
+              "over an open interval")
+        failed.append('session-boundaries')
+    ident = conn.execute("SELECT COUNT(*) FROM identity").fetchone()[0]
+    surf = conn.execute(
+        "SELECT COUNT(*) FROM retrieval_log WHERE item_kind='identity'").fetchone()[0]
+    lo, hi = conn.execute("SELECT MIN(ts), MAX(ts) FROM observations").fetchone()
+    print(f"           identity tier     {ident:>7} stored, {surf} surfacings")
+    # A young store is empty because it is young.  Reporting that as a defect is the
+    # bad-denominator error this check exists to prevent, so it is stated, not scored.
+    young = lo and hi and lo[:10] == hi[:10]
+    if not ident or not surf:
+        if young:
+            print(f"           -> empty, but this store only spans {lo} .. {hi}: too young "
+                  f"to distinguish 'not built yet' from 'not built'. NOT scored.")
+        else:
+            print("           -> the identity tier is empty here: the 'fixed content, fixed "
+                  "length' arm has no treatment to withhold")
+            failed.append('identity-tier')
+    tgt = conn.execute("SELECT COUNT(*) FROM target_outcomes").fetchone()[0]
+    vals = conn.execute("SELECT COUNT(DISTINCT last_success) FROM target_outcomes").fetchone()[0]
+    print(f"           target_outcomes   {tgt:>7} rows, {vals} distinct last_success")
+    if tgt and vals < 2:
+        print("           -> last_success is a constant: it records that a target was seen, "
+              "not that it succeeded")
+        failed.append('target-outcomes')
+    return failed
 
 
 def check_headroom(conn, n_briefings):
@@ -145,15 +265,20 @@ def main():
     ap.add_argument('--db')
     args = ap.parse_args()
     db = resolve_db(args.db)
-    print(f"store: {db}\n")
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    print_ref(conn, db)
 
     n_briefings, quota_failed = check_quota(conn)
     headroom_failed = check_headroom(conn, n_briefings)
     dim_failed = check_resolution(conn)
+    channel_failed = check_channel(conn)
 
     print()
-    if quota_failed or headroom_failed or dim_failed:
+    if channel_failed:
+        print(f"FAIL channel:    {', '.join(channel_failed)} -- this store cannot carry a "
+              f"session-grain outcome; a design that needs no outcome column still needs "
+              f"a channel")
+    if quota_failed or headroom_failed or dim_failed or channel_failed:
         if quota_failed:
             print(f"FAIL quota:      {', '.join(quota_failed)} filled to the slice(0,3) cap in "
                   f">{100 * MAX_QUOTA_SHARE:.0f}% of briefings -- surfacing count is not evidence")
