@@ -237,6 +237,11 @@ scored against the same session, scores the same:
 | identity | 3,648 | 54.5% | 54.3% | +0.2pp | 0.852 |
 | pattern | 3,648 | 15.8% | 16.4% | −0.7pp | 0.222 |
 
+Replicated independently across **12 per-project stores** (`--all-stores`, pooled: observation
++2.5pp / n=6,684, identity +0.2pp / n=4,074, pattern −0.3pp / n=5,162). **Zero of 24 store×kind
+cells** show a lift ≥5pp. A placebo drawn from an unrelated project directory scores the same as
+one drawn from the same session — the column does not even resolve topic, let alone item.
+
 The outcome proxy (`memory.ts:352-372`) calls a memory relevant when ≥2 of its significant tokens
 reappear in later same-cwd work within 6h. Clearing a fixed threshold scales with how many tokens the
 item brought (`match_key` is `.slice(0, 40)`), so the column measures **token budget and genre** —

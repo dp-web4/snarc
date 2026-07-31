@@ -70,13 +70,52 @@ def sig_tokens(text):
     return out
 
 
+# Store roots, newest naming first. The 8aacf1a rename (2026-07-31) moved the live
+# store ~/.engram/**/engram.db -> ~/.snarc/**/snarc.db and deliberately left the old
+# 1.1GB store in place as an archive. Both are real; which one you read is an axis of
+# any number this script prints, so it is always named in the output and never guessed
+# silently. The 10,715 scored pairs this audit was written against live ONLY in the
+# archive -- the live store started at zero.
+STORE_ROOTS = [('~/.snarc/projects', 'snarc.db', 'live'),
+               ('~/.engram/projects', 'engram.db', 'ARCHIVE (pre-8aacf1a rename)')]
+
+
+def find_stores():
+    """Every store found, largest first, each tagged with which root it came from."""
+    found = []
+    for root, fname, label in STORE_ROOTS:
+        r = os.path.expanduser(root)
+        if not os.path.isdir(r):
+            continue
+        for d in sorted(os.listdir(r)):
+            p = os.path.join(r, d, fname)
+            if os.path.exists(p):
+                found.append((p, label, os.path.getsize(p)))
+    return found
+
+
 def default_db():
-    root = os.path.expanduser('~/.engram/projects')
-    if not os.path.isdir(root):
-        return None
-    cands = [os.path.join(root, d, 'engram.db') for d in os.listdir(root)]
-    cands = [c for c in cands if os.path.exists(c)]
-    return max(cands, key=os.path.getsize) if cands else None
+    """Pick the store that actually has scored pairs; prefer live over archive on ties.
+
+    Picking by file size alone would silently select the archive forever, since it is
+    100x larger and will stay that way for months.
+    """
+    stores = find_stores()
+    scored = []
+    for p, label, size in stores:
+        try:
+            c = sqlite3.connect(f'file:{p}?mode=ro', uri=True)
+            n = c.execute("SELECT COUNT(*) FROM retrieval_log WHERE relevant IS NOT NULL").fetchone()[0]
+            c.close()
+        except sqlite3.Error:
+            n = 0
+        scored.append((p, label, n))
+    with_rows = [s for s in scored if s[2] > 0]
+    if not with_rows:
+        return (None, scored)
+    # live root is listed first in STORE_ROOTS, so a stable sort on row count keeps it ahead
+    best = max(with_rows, key=lambda s: s[2])
+    return (best, scored)
 
 
 class SessionVocab:
@@ -135,20 +174,28 @@ def audit(conn, sample, seed):
 
         pop = rows if sample <= 0 or sample >= len(rows) else rng.sample(rows, sample)
         n = real = plac = cross = b = c = 0
-        stored_agree = 0
+        n_cross = no_placebo = 0
         for cwd, ts, mk in pop:
             toks = [t for t in (mk or '').split(' ') if t]
             if not toks:
                 continue
-            v = vocab.get(cwd, ts)
-            n += 1
 
-            R = scores(toks, v)
-            real += R
-
+            # A store can hold only one distinct item of a kind (e.g. a single identity
+            # statement re-surfaced every session). Then no length-matched ALTERNATIVE
+            # exists and the row is uncontrollable. Scoring the missing placebo as 0
+            # would manufacture a lift out of the absence of a comparison -- which is the
+            # exact failure mode this script exists to catch. Exclude and report instead.
             pool = [x for L in range(len(toks) - 3, len(toks) + 4) for x in by_len.get(L, ())
                     if x[2] != mk]
-            P = scores(rng.choice(pool)[2].split(' '), v) if pool else 0
+            if not pool:
+                no_placebo += 1
+                continue
+
+            v = vocab.get(cwd, ts)
+            n += 1
+            R = scores(toks, v)
+            real += R
+            P = scores(rng.choice(pool)[2].split(' '), v)
             plac += P
             if R and not P:
                 b += 1
@@ -158,7 +205,7 @@ def audit(conn, sample, seed):
             xpool = [x for x in pool if x[0] != cwd]
             if xpool:
                 cross += scores(rng.choice(xpool)[2].split(' '), v)
-                stored_agree += 1
+                n_cross += 1
 
         if n == 0:
             continue
@@ -166,11 +213,89 @@ def audit(conn, sample, seed):
         results.append({
             'kind': kind, 'n': n,
             'real': real / n * 100, 'placebo': plac / n * 100,
-            'cross': cross / stored_agree * 100 if stored_agree else float('nan'),
+            'cross': cross / n_cross * 100 if n_cross else float('nan'),
             'lift': (real - plac) / n * 100, 'b': b, 'c': c, 'chi2': chi2, 'p': p,
+            'no_placebo': no_placebo,
             'avg_tokens': sum(len(r[2].split(' ')) for r in pop) / len(pop),
         })
     return results
+
+
+def all_stores(args):
+    """Replicate the placebo control independently in every store that has enough data.
+
+    Each per-project store is an independent sample: different repo, different vocabulary,
+    different sessions. If the outcome column were measuring the item, the lift would
+    survive in most of them.
+    """
+    stores = [(p, lab, n) for p, lab, n in
+              [(p, lab, count_scored(p)) for p, lab, _ in find_stores()]
+              if n >= args.min_store_n]
+    if not stores:
+        print(f"no store has >= {args.min_store_n} scored rows", file=sys.stderr)
+        return 2
+
+    print(f"Replicating the placebo control across {len(stores)} independent stores "
+          f"(>= {args.min_store_n} scored rows each)\n")
+    hdr = f"{'store':<14} {'kind':<12} {'n':>6} {'REAL':>7} {'PLACEBO':>8} {'lift':>8} {'p':>7}"
+    print(hdr)
+    print('-' * len(hdr))
+
+    pooled = {}
+    n_lifts = {}
+    for path, label, _ in stores:
+        conn = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
+        tag = os.path.basename(os.path.dirname(path))[:12]
+        try:
+            for r in audit(conn, args.sample, args.seed):
+                if r['n'] < 30:
+                    continue
+                excl = f"  excl={r['no_placebo']}" if r['no_placebo'] else ''
+                print(f"{tag:<14} {r['kind']:<12} {r['n']:>6} {r['real']:>6.1f}% "
+                      f"{r['placebo']:>7.1f}% {r['lift']:>+7.1f}pp {r['p']:>7.3f}{excl}")
+                agg = pooled.setdefault(r['kind'], {'n': 0, 'b': 0, 'c': 0, 'real': 0.0, 'plac': 0.0})
+                agg['n'] += r['n']
+                agg['b'] += r['b']
+                agg['c'] += r['c']
+                agg['real'] += r['real'] * r['n'] / 100
+                agg['plac'] += r['placebo'] * r['n'] / 100
+                n_lifts.setdefault(r['kind'], []).append(r['lift'])
+        except sqlite3.Error as e:
+            print(f"{tag:<14} (skipped: {e})")
+        finally:
+            conn.close()
+
+    print(f"\n{'POOLED':<14} {'kind':<12} {'n':>6} {'REAL':>7} {'PLACEBO':>8} {'lift':>8} {'p':>7}   stores with lift>=5pp")
+    print('-' * 95)
+    failed = []
+    for kind, a in sorted(pooled.items()):
+        real, plac = a['real'] / a['n'] * 100, a['plac'] / a['n'] * 100
+        _, p = mcnemar(a['b'], a['c'])
+        lifts = n_lifts[kind]
+        material = sum(1 for L in lifts if L >= MIN_LIFT_PP)
+        ok = (real - plac) >= MIN_LIFT_PP and p <= MAX_P
+        if not ok:
+            failed.append(kind)
+        print(f"{'':<14} {kind:<12} {a['n']:>6} {real:>6.1f}% {plac:>7.1f}% "
+              f"{real - plac:>+7.1f}pp {p:>7.3f}   {material}/{len(lifts)}")
+
+    print()
+    if failed:
+        print(f"FAIL (pooled): outcome is item-blind for {', '.join(failed)} across "
+              f"{len(stores)} independent stores.")
+        return 1
+    print("PASS (pooled).")
+    return 0
+
+
+def count_scored(path):
+    try:
+        c = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
+        n = c.execute("SELECT COUNT(*) FROM retrieval_log WHERE relevant IS NOT NULL").fetchone()[0]
+        c.close()
+        return n
+    except sqlite3.Error:
+        return 0
 
 
 def main():
@@ -178,15 +303,42 @@ def main():
     ap.add_argument('--db', default=None)
     ap.add_argument('--sample', type=int, default=0, help='0 = full population')
     ap.add_argument('--seed', type=int, default=23)
+    ap.add_argument('--all-stores', action='store_true',
+                    help='replicate across every per-project store, then pool. Turns a '
+                         'single-seat finding into N independent ones.')
+    ap.add_argument('--min-store-n', type=int, default=100,
+                    help='with --all-stores, skip stores with fewer scored rows')
     args = ap.parse_args()
 
-    db = args.db or default_db()
-    if not db or not os.path.exists(db):
-        print(f"no engram db found (looked at {db})", file=sys.stderr)
+    if args.all_stores:
+        return all_stores(args)
+
+    if args.db:
+        db, label, inventory = args.db, 'explicit --db', []
+    else:
+        best, inventory = default_db()
+        if best is None:
+            print("no store with scored retrieval_log rows found. Stores seen:", file=sys.stderr)
+            for p, lab, n in inventory:
+                print(f"  {p}  [{lab}]  scored={n}", file=sys.stderr)
+            return 2
+        db, label, _ = best
+
+    if not os.path.exists(db):
+        print(f"no store at {db}", file=sys.stderr)
         return 2
 
     conn = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
-    print(f"db: {db}")
+    print(f"db: {db}   [{label}]")
+    others = [(p, lab, n) for p, lab, n in inventory if p != db and n > 0]
+    if others:
+        tot = sum(n for _, _, n in others)
+        print(f"    ({len(others)} other stores hold {tot:,} more scored pairs — "
+              f"--all-stores to replicate across them)")
+    if 'ARCHIVE' in label:
+        print("    NOTE: reading the archive. The live store has no scored pairs yet — but\n"
+              "    scoreRetrievals() is unchanged by the rename, so it will refill with the\n"
+              "    same item-blind definition unless that is fixed first.")
     print(f"outcome instrument: >={OVERLAP_THRESHOLD} shared significant tokens with "
           f"later same-cwd work within {WINDOW.strip('+')}\n")
 
@@ -210,9 +362,10 @@ def main():
         else:
             verdict = 'ITEM-BLIND'
             failed.append(r['kind'])
+        excl = f"  (+{r['no_placebo']} rows had no length-matched alternative — excluded)" if r['no_placebo'] else ''
         print(f"{r['kind']:<12} {r['n']:>6} {r['avg_tokens']:>8.1f} {r['real']:>6.1f}% "
               f"{r['placebo']:>7.1f}% {r['cross']:>9.1f}% {r['lift']:>+7.1f}pp "
-              f"{r['p']:>8.3f}  {verdict}")
+              f"{r['p']:>8.3f}  {verdict}{excl}")
 
     print()
     if failed:

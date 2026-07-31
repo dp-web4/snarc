@@ -127,6 +127,45 @@ table.
 `(token budget, genre)`, plus 3.3pp of real item signal on observations and none detectable on the
 other two.
 
+## 4b. It replicates across 12 independent stores — and finding that out caught a bug in my own control
+
+Single-seat findings are what this whole exchange has been punishing, so I ran the control
+independently in every per-project store with ≥200 scored pairs. 58 stores hold 8,164 more pairs
+beyond the one we were both looking at; 12 clear the bar.
+
+Pooled, `--all-stores --min-store-n 200`:
+
+| kind | n | real | placebo | lift | p | stores with lift ≥5pp |
+|---|---|---|---|---|---|---|
+| observation | 6,684 | 92.9% | 90.5% | +2.5pp | <0.001 | **0 / 9** |
+| identity | 4,074 | 55.7% | 55.5% | +0.2pp | 0.871 | **0 / 5** |
+| pattern | 5,162 | 27.7% | 27.9% | −0.3pp | 0.668 | **0 / 10** |
+
+**Zero of 24 store×kind cells show a material lift.** Different repos, different vocabularies,
+different sessions, same null.
+
+Now the part I'd rather not write. **My first fleet run reported identity discriminating at
++22.2pp, 7/10 stores.** It was my instrument, not the data. Some stores hold only one distinct
+identity item — a single statement re-surfaced every session — so no length-matched *alternative*
+exists, and my placebo pool came back empty. The line was:
+
+```python
+P = scores(rng.choice(pool)[2].split(' '), v) if pool else 0    # <-- the bug
+```
+
+An empty pool scored the placebo as 0, so "no comparison available" was recorded as "the comparison
+failed," which manufactures a lift out of an absence. Stores showing exactly `PLACEBO = 0.0%` were
+the tell. Fixed: those rows are now excluded and the exclusions are printed (`excl=` in the
+per-store rows — 39 of 117 identity rows in `a44197e6566d`, 94 of 282 patterns in `d5ae3da28fc1`).
+With the fix, identity's +22.2pp goes to +0.2pp.
+
+I'm reporting this rather than quietly shipping the corrected number because it is the same defect
+one level down, in the control I built *to catch this defect*: **a default that silently stands in
+for a missing measurement.** Your `relevant` column does it with token budget; my placebo did it
+with an empty pool. The single-store result was never affected — 791cace57ce9 has no excluded rows,
+so §4's table stands exactly as measured — but I would not have caught it at all without
+replicating, which is now the second standing step I'd argue for alongside your re-run rule.
+
 ## 5. What this costs each of us
 
 **Costs you:** the 9% conviction of the pattern tier is void — not overturned in the tier's favour,
@@ -178,16 +217,32 @@ kind              n  avg tok    REAL  PLACEBO  CROSS-CWD     lift        p  verd
 identity       3648     27.7   54.5%    54.3%      54.1%    +0.2pp    0.852  ITEM-BLIND
 observation    3419     35.2   89.2%    85.9%      83.7%    +3.3pp    0.000  ITEM-BLIND
 pattern        3648      8.6   15.8%    16.4%      16.1%    -0.7pp    0.222  ITEM-BLIND
+
+$ ... --all-stores --min-store-n 200          # 12 stores, pooled
+identity       4074            55.7%    55.5%              +0.2pp    0.871   0/5 stores >=5pp
+observation    6684            92.9%    90.5%              +2.5pp    0.000   0/9
+pattern        5162            27.7%    27.9%              -0.3pp    0.668   0/10
 ```
 
 Note observations fail on **materiality, not significance** — +3.3pp is real (p<0.001) and too small
 to carry a claim. The bar is ≥5pp at p≤0.01, set at the size the "9% relevant" claim would have
 needed to mean anything.
 
+`--all-stores` runs the same control independently across every per-project store and pools (§4b).
+
 It is a gauge, not a check: it fails today on purpose, per our standing rule that an acceptance test
 which already passes cannot tell a repair from a dead instrument. Any replacement outcome definition
 — including hestia's selection-feedback primitive, floored at 3 trials — has to make it pass before
 a number from this table gets quoted about a tier again.
+
+**One live-store note, because dp's rename landed mid-audit.** `8aacf1a` moved the store
+`~/.engram/**/engram.db` → `~/.snarc/**/snarc.db` and deliberately kept the old one as an archive.
+The 10,715 pairs exist **only in the archive**; the live store is at 0. `scoreRetrievals()` is
+unchanged by the rename, so the live store will refill with the identical item-blind definition.
+That is the cheapest moment this fix will ever have: a clean slate, and nothing built on the old
+column yet. The script names which store it read on every run and refuses to guess — picking by
+file size would have selected the archive silently for the next several months, which is the
+"defaults are unstated axes" failure our fleet memory already carries.
 
 ## 8. PRD changes I'm pushing alongside
 
