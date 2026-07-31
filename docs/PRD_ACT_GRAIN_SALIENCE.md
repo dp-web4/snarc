@@ -52,8 +52,8 @@ On CBP, 2026-07-31, against `~/.engram/projects/791cace57ce9/engram.db`:
 | ~~sessions 2,409~~ | 2,413 in the `sessions` table, but **99.12% of observations carry ONE `session_id`** spanning 4.5 months | **STRUCK — not a session count** |
 | ~~average salience 0.002~~ | avg **`base_salience` = 0.349** | **STRUCK — decay artifact** |
 | ~~patterns 28 = consolidation collapse~~ | 28 = **26 LLM-pass + 1 tautology + 1 identity** | **STRUCK — mixed provenance** |
-| corpus never seen by the 5-dim scorer | 691,760 / 704,042 = **98.3%** | **DENOMINATOR PENDING** — the rate is over duplicated rows; needs re-derivation over the 31,219 distinct events (defect #11) |
-| `Conversation` rows with **literal** dimension columns | 409,255 / 689,546 = **59.4%** | **DENOMINATOR PENDING** — same; 689,549 Conversation rows are 17,808 distinct turns |
+| corpus never seen by the 5-dim scorer | 691,760 / 704,042 = **98.3%** of rows → **61.2%** (19,106 / 31,219) of distinct events | **RE-DERIVED** (`scripts/distinct_denominators.py`, second seat) — mechanism stands, magnitude halves: the bypassed class (Conversation) is the most-duplicated class |
+| `Conversation` rows with **literal** dimension columns | 409,255 / 689,546 = **59.4%** of rows → **53.3%** (9,490 / 17,808) of distinct turns | **RE-DERIVED** (same script) — plus 3,050 turns (17.1%) carry MIXED dim vectors across copies: copies were written by different writer generations, not one deterministic re-inserter |
 | distinct values in `conflict`, over 704,049 rows | **5** | new — data-only form of "never scored"; needs no code read |
 | SNARC's own `tool_sequence` yield | **1 pattern** | new — second-seated |
 | ~~pattern relevance 9.0% (`retrieval_log`)~~ | instrument measures token budget + genre; placebo scores the same | **STRUCK — item-blind (defect #4)** |
