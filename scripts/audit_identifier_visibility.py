@@ -78,6 +78,13 @@ _WORDISH = re.compile(r'[a-z][a-z0-9_]{3,}')
 MATCH_KEY_CAP = 40      # memory.ts:440  `.slice(0, 40)`
 SHOWN_CHARS = 100       # memory.ts:406  `input_summary.slice(0, 100)`
 
+# --- the PROPOSED branches (requirement 1, accepted by kimi in the notice-537 reply:
+# "bare digit runs >=4, hex runs >=6"). Not in src/memory.ts -- this mirrors what the change
+# WOULD be, so --proposed can price it before anyone writes it. If it lands, move these into
+# sigTokens and delete the toggle. ---
+_P_DIGITS = re.compile(r'(?<![a-z0-9])\d{4,}(?![a-z0-9])')
+_P_HEX = re.compile(r'(?<![a-z0-9])[0-9a-f]{6,40}(?![a-z0-9])')
+
 # Generous identifier candidates -- deliberately WIDER than sigTokens, since the whole
 # question is what sigTokens drops. Applied to the lowercased text, like sigTokens.
 _ID_FAMILIES = [
@@ -98,23 +105,28 @@ BLIND_FLOOR = 0.50      # >=50% of identifiers must survive for "measurable toda
 COVERAGE_FLOOR = 0.10   # >=10% of rows must be scorable at all
 
 
-def sig_tokens(text):
+def sig_tokens(text, proposed=False):
     """sigTokens(), mirrored. Returns the set BEFORE stop-token filtering (memory.ts does that
-    at the call site)."""
+    at the call site). proposed=True adds the two identifier branches requirement (1) asks for."""
     t = (text or '').lower()
     out = set()
     for m in _PATHISH.finditer(t):
         out.add(m.group(0))
     for m in _WORDISH.finditer(t):
         out.add(m.group(0))
+    if proposed:
+        for m in _P_DIGITS.finditer(t):
+            out.add(m.group(0))
+        for m in _P_HEX.finditer(t):
+            out.add(m.group(0))
     return out
 
 
-def match_key_tokens(text):
+def match_key_tokens(text, proposed=False):
     """What logRetrieval() would actually store: sigTokens minus stop tokens, capped at 40.
     Set semantics upstream mean the cap's victims are arbitrary; we mirror the cap but not
     the (unordered) selection, so this OVERCOUNTS survivors -- generous to the proposal."""
-    return {t for t in sig_tokens(text) if t not in STOP_TOKENS}
+    return {t for t in sig_tokens(text, proposed) if t not in STOP_TOKENS}
 
 
 def identifiers(text):
@@ -174,7 +186,7 @@ def default_db():
     return max(live or nonzero, key=lambda c: c[2]), counts
 
 
-def audit(db, label):
+def audit(db, label, proposed=False):
     con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
     con.row_factory = sqlite3.Row
 
@@ -191,23 +203,34 @@ def audit(db, label):
     outside_shown = 0
     survived_total = 0
     obs_with_ids = 0
+    # Per-observation carriers: does this row carry at least one SURVIVING identifier? Split by
+    # the briefing's own eligibility predicate (salience >= 0.35, memory.ts:402) so the estimate
+    # has a matched population, not just a caveat.
+    carriers = {'all': [0, 0], 'eligible': [0, 0]}
 
     for r in rows:
         full = f"{r['input_summary'] or ''} {r['output_summary'] or ''}"
         shown = (r['input_summary'] or '')[:SHOWN_CHARS]
-        toks = match_key_tokens(full)
-        shown_toks = match_key_tokens(shown)
+        toks = match_key_tokens(full, proposed)
+        shown_toks = match_key_tokens(shown, proposed)
         ids = identifiers(full)
         if any(ids.values()):
             obs_with_ids += 1
+        row_carries = False
         for fam in fam_total:
             for ident in ids[fam]:
                 fam_total[fam] += 1
                 if survives(ident, toks):
                     fam_survived[fam] += 1
                     survived_total += 1
+                    row_carries = True
                     if not survives(ident, shown_toks):
                         outside_shown += 1
+        strata = ['all'] + (['eligible'] if (r['salience'] or 0) >= 0.35 else [])
+        for s in strata:
+            carriers[s][1] += 1
+            if row_carries:
+                carriers[s][0] += 1
 
     # --- B: row coverage over the live retrieval_log ---
     keys = con.execute('SELECT match_key FROM retrieval_log').fetchall()
@@ -216,12 +239,15 @@ def audit(db, label):
         toks = set((k['match_key'] or '').split())
         if any(any(rx.fullmatch(t) or rx.search(t) for _, rx in _ID_FAMILIES) for t in toks):
             scorable += 1
+    span = con.execute(
+        'SELECT MIN(surfaced_ts), MAX(surfaced_ts) FROM retrieval_log').fetchone()
     con.close()
 
     total_ids = sum(fam_total.values())
     total_surv = sum(fam_survived.values())
 
-    print(f'\n=== store: {db}  [{label}] ===')
+    print(f'\n=== store: {db}  [{label}] '
+          f'{"(PROPOSED tokenizer -- not the code in src/) " if proposed else ""}===')
     print(f'observations: {len(rows)}   with >=1 identifier-shaped string: {obs_with_ids}')
     print(f'retrieval_log rows: {len(keys)}')
 
@@ -237,13 +263,46 @@ def audit(db, label):
     print('\nB. ROW COVERAGE  (live retrieval_log rows carrying >=1 identifier-shaped token)')
     cov = (scorable / len(keys)) if keys else 0.0
     print(f'   {scorable} / {len(keys)} = {cov:.1%}  <- ceiling on rows an identifier column could score')
+    if proposed:
+        print('   NOTE: unchanged by --proposed, and that is the finding. match_key is written once')
+        print('   at surface time (memory.ts:440-443) and scoreRetrievals() iterates the STORED key')
+        print('   (memory.ts:459,468-470), so a tokenizer change cannot reach a row already written.')
 
     print('\nC. SHOWN-vs-SCORED GAP  (surviving identifiers past the briefing line\'s 100-char cut)')
     gap = (outside_shown / total_surv) if total_surv else 0.0
     print(f'   {outside_shown} / {total_surv} = {gap:.1%}  <- scored but never shown; recurrence cannot')
     print( '                            have been caused by the briefing for these')
 
-    return surv_rate, cov, total_ids, len(keys)
+    if proposed:
+        print('\nD. FORWARD-ONLY EXPOSURE  (what requirement (1) does NOT buy)')
+        print(f'   rows written under the CURRENT tokenizer, permanently unscorable: {len(keys)}')
+        rate = None
+        if span and span[0] and span[1]:
+            try:
+                from datetime import datetime
+                fmt = '%Y-%m-%d %H:%M:%S'
+                t0 = datetime.strptime(span[0][:19], fmt)
+                t1 = datetime.strptime(span[1][:19], fmt)
+                hours = (t1 - t0).total_seconds() / 3600.0
+                if hours > 0:
+                    rate = len(keys) / hours * 24.0
+                    print(f'   accrual: {len(keys)} rows over {hours:.1f}h '
+                          f'({span[0]} -> {span[1]}) = {rate:.0f} rows/day')
+            except ValueError:
+                pass
+        for strat, (c, n) in carriers.items():
+            r = (c / n) if n else 0.0
+            print(f'   post-fix carrier rate, {strat:8} observations: {c}/{n} = {r:.1%}')
+        elig = carriers['eligible']
+        if rate and elig[1]:
+            per_day = rate * (elig[0] / elig[1])
+            print(f'   => ~{per_day:.0f} identifier-carrying rows/day post-fix; '
+                  f'{200/per_day:.1f} days to 200, {1000/per_day:.1f} to 1000')
+        print('   (carrier rate is measured on observations, not on the briefing-selected rows')
+        print('    themselves -- retrieval_log stores no reference to the item it logged, so the')
+        print('    selected population cannot be reconstructed. See requirement (2).)')
+
+    return surv_rate, cov, total_ids, len(keys), gap
 
 
 def main():
@@ -252,6 +311,9 @@ def main():
     ap.add_argument('--all-stores', action='store_true')
     ap.add_argument('--min-rows', type=int, default=50,
                     help='with --all-stores, skip stores with fewer retrieval_log rows')
+    ap.add_argument('--proposed', action='store_true',
+                    help='ALSO measure under the proposed tokenizer (digit runs >=4, hex >=6) and '
+                         'print the delta. Prices requirement (1) before anyone writes it.')
     args = ap.parse_args()
 
     if args.db:
@@ -283,8 +345,14 @@ def main():
 
     verdicts = []
     for db, label in targets:
-        surv, cov, n_ids, n_rows = audit(db, label)
+        surv, cov, n_ids, n_rows, gap = audit(db, label)
         verdicts.append((db, surv, cov, n_ids, n_rows))
+        if args.proposed:
+            p_surv, p_cov, _, _, p_gap = audit(db, label, proposed=True)
+            print(f'\n   DELTA (current -> proposed): tokenizer survival '
+                  f'{surv:.1%} -> {p_surv:.1%}   row coverage {cov:.1%} -> {p_cov:.1%}')
+            print(f'   DELTA shown-vs-scored gap: {gap:.1%} -> {p_gap:.1%}'
+                  f'   <- requirement (1) alone moves the CAUSAL gap this way')
 
     print('\n=== VERDICT ===')
     ok = True
