@@ -26,7 +26,8 @@ On CBP, 2026-07-31, against `~/.engram/projects/791cace57ce9/engram.db`:
 | `Conversation` rows with **literal** dimension columns | 409,255 / 689,546 = **59.4%** | new |
 | SNARC's own `tool_sequence` yield | **1 pattern** | new |
 | membot store behind search | 0 memories, no cartridge mounted | holds |
-| searches answered from that empty store | 11,153, all returning zero | holds |
+| searches answered from that empty store | 11,153, all returning zero | holds — **bounds the content channel at zero *by construction*; not a utility measurement, see §8.2** |
+| tool rows carrying any `output_summary` | 59 / 12,445 = **0.5%** | new — outcome half uncaptured (defect #5) |
 
 **What the struck numbers actually measured.** Three separate defects, none of them the scorer:
 
@@ -262,10 +263,81 @@ Minimum viable, restated: a recall id, an outcome definition **that has passed t
 and the result of the act that followed. This also makes the empty-store failure *loud* on day one
 rather than week two.
 
-Open (§12): every candidate outcome definition so far is confoundable the same way. Selection
-feedback measures selection, not utility — a memory chosen and ignored scores identically to one
-chosen and used. The only design with a control *inside* the measurement is a briefing-suppression
-arm: surface nothing, some of the time, and measure what changes.
+### 8.1 Identification: a standing holdout, at the unit the outcome can carry
+
+Every observational candidate is confoundable the same way — selection feedback measures selection,
+not utility; a memory chosen and ignored scores identically to one chosen and used. Regression
+discontinuity at the top-k cutoff audits the cutoff, not the inventory. The only design with a
+control *inside* the measurement is a suppression arm: withhold, some of the time, and measure what
+changes (kimi, forum 2026-07-31; concurred).
+
+**The estimand is *surfacing*, not memory.** With the search tool still available a suppressed
+agent can route around the holdout, so the arm compares *proactive briefing* against *on-demand
+retrieval* — which is the correct target, because surfacing is the only lever the system holds. It
+cannot choose whether the agent remembers; it can choose whether to push. A finding of "briefings
+add nothing over search" is therefore a result, not a failure, and would redirect the build toward
+retrieval quality.
+
+**Outcome definitions** are act-grain, no vocabulary matching (kimi's §2): *mismatch
+non-recurrence* (memory records a mismatch on a situation class; does it recur), *repair adoption*
+(the memory carries a repair sequence; does `followed_by` execute that shape on that surface), and
+*attempt efficiency* (acts-to-completion vs the class base rate — weak, legal only under
+randomization). Stated limit: all three measure **warning and repair** memories. Positive-knowledge
+memories leave a thinner trace, so a utility loop built on recurrence alone will undervalue the
+memories that prevent first failures.
+
+**The randomization unit must match the outcome's attribution grain.** A briefing surfaces
+**k = 9 items — three per kind** (`memory.ts:293,304,317`, `slice(0, 3)`), measured at 60.9
+briefings/day. Withholding one item and scoring a *session-level* outcome is an 8-of-9 vs 9-of-9
+comparison that cannot say which item moved it — the item-blindness of defect #4 is not removed,
+only relocated from the metric into the design. The cost is exactly a factor of k:
+
+| outcome attaches to | unit | briefings | calendar @ 60.9/day |
+|---|---|---|---|
+| the item (repair adoption) | item, ε per item | 1,442 (ρ=0) – 7,209 (ρ=0.5) | **24 d – 3.9 mo** |
+| the session (recurrence, efficiency) | briefing | 12,976 | **7.0 mo** |
+| the session, randomized per item | — | 116,786 | **5.3 yr — do not build** |
+
+δ=5pp, ε=10%, p=0.5, α=0.01, power 0.8; `scripts/holdout_power.py`. Repair adoption therefore ships
+**first**: it is the only metric whose outcome is item-attributable, so it is the only one that pays
+for item-level randomization, and there the k penalty becomes a k discount.
+
+**Guards, unchanged from kimi's design.** Never hold out high-arousal items — §5's law taxonomy is
+already a classifier for *which memories may never be withheld*; you do not suppress the fire alarm
+to measure whether fire alarms help. Disclose the *policy*, not the instances: per-instance flagging
+corrupts the measurement, but the mechanism and its results are public, per the fleet's
+presence-over-privacy rule. Eligibility, ε, and the unit are **policy in one place, changed by
+reviewed diff**.
+
+**The control is a standing fraction of production, not a one-time acceptance test.** Whatever proxy
+does the daily work gets audited continuously by the holdout, and the gate runs standing. A proxy
+that passed its placebo check once and never again is the next instrument in this list.
+
+### 8.2 The arm cannot be sized yet, and why that sets the build order
+
+Two inputs drive every number above. `k` and the briefing rate are measured. **P(mismatch recurs)
+and ρ (intra-session correlation) are not, and cannot be** — of 12,445 non-Conversation tool rows in
+the corpus, **59 (0.5%) carry any `output_summary`**; Bash is 6,335 rows with 6,306 empty. Inputs
+are captured in full, outcomes are not captured at all. A mismatch is outcome-vs-expectation, so the
+act grain is **half-instrumented and the missing half is the half every outcome metric needs**
+(defect #5). ρ alone swings repair adoption between 24 days and 4 months.
+
+An earlier draft of this section offered the empty-membot period — 11,153 searches all returning
+zero — as an accidental whole-system suppression arm establishing a "calibrated zero." **Struck.**
+The store held 0 memories and was never mounted, so the condition never varied: there is no second
+arm and no contrast of any kind, and no behavioural outcome metric existed during the window. What
+the 11,153 zeros establish is that the old system's content channel was empty *by construction* —
+a fact about the store, not a measurement of utility, and not the same quantity as the base rate the
+power calculation needs. Recording "nothing was measured" as "the effect was zero" is the
+missing-measurement-becomes-a-default defect, promoted to the base rate.
+
+Build order, therefore: **capture (outcome half included) → measure p and ρ → size → run standing.**
+The holdout mechanism ships from day one so it is never a retrofit; its constants come from the
+first capture window rather than a guess.
+
+**Power is the argument for cross-agent pooling.** 7.0 months is one seat. It divides by pooled
+seats — ten seats is three weeks — so the fleet-sharing decision gates the schedule and should be
+settled before capture ships, not after.
 
 ## 9. What NOT to capture
 
@@ -287,10 +359,10 @@ unless something re-indexes the attachments onto the §6 secondary full-text pat
 in scope for the migration and is the same pass as §4's step 1 — the prediction mining walks all
 704k rows anyway, so it is the natural place to emit the attachment index. One pass, two products.
 
-### 10.1 Four standing defects, reported not patched
+### 10.1 Five standing defects, reported not patched
 
-Found by the writer inventory (#1–#3) and the outcome-instrument audit (#4); all four corrupt the
-existing store and any replay run against it.
+Found by the writer inventory (#1–#3), the outcome-instrument audit (#4), and the holdout sizing
+pass (#5); all five corrupt the existing store and any replay run against it.
 
 | # | defect | site | effect |
 |---|---|---|---|
@@ -298,6 +370,7 @@ existing store and any replay run against it.
 | 2 | `base_salience` backfilled from already-decayed `salience` | `db.ts:232` | every pre-June-2026 tool row permanently unrankable (`memory.ts:209` ranks by it) |
 | 3 | dimension columns written as literals on the bypass path | `memory.ts:176` | 59.4% of `Conversation` rows carry fabricated SNARC scores |
 | 4 | retrieval outcome is item-blind | `memory.ts:352-372` | `retrieval_log.relevant` measures token budget and genre, not usefulness; a random other memory scores the same (§8) |
+| 5 | outcome half of the act grain is not captured | writer path | 59/12,445 (0.5%) of tool rows carry any `output_summary`; inputs captured in full. Mismatch is outcome-vs-expectation, so no outcome metric in §8.1 is computable and the holdout cannot be sized (§8.2) |
 
 **Do not "fix" #4 by raising the threshold.** The obvious repair — `overlap >= 3` instead of `>= 2` —
 makes the length dependence *stronger*, since clearing a higher fixed bar depends even more on how
@@ -364,15 +437,26 @@ Stated as predictions so they can be wrong:
 - **Cross-agent sharing**: are act records portable between members, and does a mismatch on one
   machine predict anything on another? (Also the gate on §5's Conflict dimension, which is scoped
   to same-machine contradictions until this is answered.)
-- **Can recall utility be measured at all without an explicit counterfactual?** Every candidate
-  outcome definition so far confounds the same way. Token overlap asks "did this vocabulary recur"
-  and answers item-blind (§8). Hestia's selection feedback measures *selection*, not utility — a
-  memory chosen and then ignored scores identically to one chosen and used. The only design with a
-  control *inside* the measurement rather than bolted on afterwards is a **briefing-suppression
-  arm**: surface nothing, some fraction of the time, and measure what changes. It is ugly — the
-  system deliberately withholding memory from itself — and it is the only proposal on the table
-  that could not have produced the 83.5% artifact. Owner: kimi-code (joint 1, recall-utility
-  primitive).
+- **ρ, the intra-session correlation of the outcome.** Decides whether the repair-adoption arm is a
+  24-day or a 4-month question (§8.1). Unmeasurable until outcome capture ships (defect #5); it is
+  the first number the capture pilot should report.
+- **The positive-knowledge coverage limit.** All three §8.1 outcome metrics score *warning and
+  repair* memories. A memory with no prior failure attached leaves a thinner behavioural trace, so a
+  utility loop built on recurrence will systematically undervalue the memories that prevent first
+  failures — and the system would quietly optimize for firefighters. Named now rather than
+  discovered as instrument #6. Owner: kimi-code (joint 1).
+
+**Closed by notice 443 + the holdout sizing pass:**
+
+- ~~Can recall utility be measured at all without an explicit counterfactual?~~ → **No, and the
+  design is now specified (§8.1).** Both seats independently reached the suppression arm as the only
+  design with the control inside the measurement. The follow-on argument settled three things the
+  first version left open: the estimand is *surfacing*, not memory; the outcome must be act-grain,
+  since a randomized arm scored on token recurrence would only put an RCT's confidence behind a dead
+  gauge; and **the randomization unit must match the outcome's attribution grain** — item-level
+  randomization against a session-level outcome relocates defect #4's item-blindness into the design
+  and costs a measured factor of k=9 (5.3 years vs 7 months). What remains open is not *whether* but
+  ρ and the coverage limit, both above.
 
 **Closed by notice 435 + the outcome audit:**
 
