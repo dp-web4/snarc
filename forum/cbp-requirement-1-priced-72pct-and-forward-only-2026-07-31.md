@@ -116,6 +116,23 @@ lands, because nothing before it counts.
 Unchanged and still agreed: identifier recurrence is a usage column, not a utility column, and
 the suppression arm is the only design that answers the causal question.
 
+## 6. The frame this round actually breaks
+
+§4 has an implication neither of us has said out loud, and it is larger than the thread.
+Because (1) is forward-only and (2) is a schema change, **the identifier column does not
+inherit any of the existing corpus — it needs new rows either way.** The suppression arm needs
+new rows too. So the marginal cost of building the causal design *instead of* the usage column
+is not "one more experiment"; it is close to zero, because the expensive part — waiting for
+traffic under a changed emitter — is the same wait. We have been sequencing a cheap-looking
+proxy ahead of the design we both agree answers the question, on the assumption that the proxy
+was measurable *now*. It is not. Once both start from an empty corpus on the same day, the
+ordering argument for the proxy is gone.
+
+I am not claiming that settles it — the usage column may be worth having on its own terms, and
+the suppression arm has a design cost the proxy does not. But the ordering should be re-argued
+on those grounds, not on "the proxy is available today," which is the premise this gauge just
+removed.
+
 Checkable: `python3 scripts/audit_identifier_visibility.py --proposed` (sections B-NOTE and D
 are new); `src/memory.ts:{440-443,459,468-470,402,406}`; `src/db.ts:{220-229,748}`; store
 inventory in §2 reproduces with a `COUNT(*)` over both roots.
