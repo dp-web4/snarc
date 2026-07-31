@@ -125,6 +125,16 @@ CREATE TABLE IF NOT EXISTS patterns (
   UNIQUE(kind, summary)
 );
 
+-- Tier-2 evidence set. patterns.frequency used to be a running SUM with no record
+-- of WHICH observations it counted, so re-consolidating the same rows re-added them.
+-- This table is the tier-2 analogue of observations.content_hash: identity is the
+-- evidence, not the arrival. Depends on no migrated column, so it belongs here.
+CREATE TABLE IF NOT EXISTS pattern_sources (
+  pattern_id  INTEGER NOT NULL,
+  obs_id      INTEGER NOT NULL,
+  PRIMARY KEY (pattern_id, obs_id)
+) WITHOUT ROWID;
+
 CREATE VIRTUAL TABLE IF NOT EXISTS patterns_fts USING fts5(
   summary, detail,
   content=patterns,
@@ -146,6 +156,10 @@ END;
 CREATE TRIGGER IF NOT EXISTS pat_ad AFTER DELETE ON patterns BEGIN
   INSERT INTO patterns_fts(patterns_fts, rowid, summary, detail)
   VALUES ('delete', old.id, old.summary, old.detail);
+  -- Evidence follows its pattern. Covers all three delete paths (prunePatterns,
+  -- deletePattern, and the (kind, summary) dedup in openDatabase) so pattern_sources
+  -- cannot accumulate rows pointing at an id that AUTOINCREMENT may later reuse.
+  DELETE FROM pattern_sources WHERE pattern_id = old.id;
 END;
 
 -- Tier 3: Identity (persistent project facts)
@@ -343,6 +357,38 @@ export function prepareStatements(db: Database.Database) {
                         THEN excluded.detail ELSE patterns.detail END,
         last_seen   = datetime('now'),
         updated_at  = datetime('now')
+    `),
+
+    // --- Tier-2 evidence guard (2026-07-31) ---
+    //
+    // `frequency = patterns.frequency + excluded.frequency` is an unbounded SUM that
+    // records no notion of WHICH observations were counted, so consolidating the same
+    // rows again adds them again. Measured on the live store the same day it was built:
+    // ~/.snarc/projects/791cace57ce9, created 04:22, TWO consolidation runs over 12,606
+    // Conversation rows -> pattern id=1 frequency 25,188 = 2 x 12,594. The number is the
+    // store counted twice, not a recurrence observed 25,188 times. On the archive shard
+    // the same mechanism over 2,413 sessions reached 43,581,138.
+    //
+    // frequency is not cosmetic: decayPatterns damps by `0.05 / (1 + log2(frequency+1))`,
+    // so a re-counted row is 26x stickier than a freq-1 pattern and is exempt in practice
+    // from the forgetting mechanism, while `ORDER BY frequency DESC` pins it at the top of
+    // every briefing. A re-count buys permanence.
+    //
+    // The repair is a35e3a8's, one tier up: identity is the EVIDENCE, not the arrival.
+    // Claim each source observation once; frequency is the size of the claimed set. Two
+    // consolidations over the same rows now converge instead of accumulating, and the
+    // 43.6M row self-corrects to its true distinct count the next time it is touched —
+    // no manual UPDATE, no decision needed about the monument.
+    claimPatternSource: db.prepare(`
+      INSERT OR IGNORE INTO pattern_sources (pattern_id, obs_id) VALUES (?, ?)
+    `),
+    getPatternId: db.prepare(`
+      SELECT id FROM patterns WHERE kind = ? AND summary = ?
+    `),
+    syncPatternFrequency: db.prepare(`
+      UPDATE patterns
+         SET frequency = (SELECT COUNT(*) FROM pattern_sources WHERE pattern_id = patterns.id)
+       WHERE id = ?
     `),
 
     upsertIdentity: db.prepare(`

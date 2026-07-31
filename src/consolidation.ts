@@ -20,6 +20,40 @@ interface Observation {
   tags: string;
 }
 
+/**
+ * Upsert a pattern and set its frequency to the size of its DISTINCT evidence set.
+ *
+ * The old call was `upsertPattern(..., count, ...)` where count was a per-run tally
+ * added to whatever was already there. Nothing recorded which observations the tally
+ * covered, so a second consolidation over the same rows added them a second time —
+ * the tier-2 form of the duplication a35e3a8 fixed at tier 1. See db.ts for the
+ * measurement (25,188 = 2 x 12,594 on a store built this morning; 43,581,138 on the
+ * archive) and for why an inflated frequency is decay immunity rather than a cosmetic.
+ *
+ * The frequency delta passed to upsertPattern is 0: the row's value is not incremented,
+ * it is DERIVED from pattern_sources immediately after. That makes re-consolidation
+ * idempotent and makes an already-inflated row self-correct on next touch.
+ *
+ * deep-consolidation.ts deliberately keeps the additive upsert — there frequency counts
+ * distinct SESSIONS proposing an identity fact, which is a different quantity with its
+ * own guard. It is not routed through here.
+ */
+function recordPattern(
+  stmts: Statements,
+  kind: string,
+  summary: string,
+  detail: string,
+  ids: number[],
+  confidence: number,
+): void {
+  const distinct = [...new Set(ids)];
+  stmts.upsertPattern.run(kind, summary, detail, 0, JSON.stringify(distinct), confidence);
+  const row = stmts.getPatternId.get(kind, summary) as { id: number } | undefined;
+  if (!row) return;   // upsert cannot fail silently, but a missing id must not throw the dream cycle
+  for (const obsId of distinct) stmts.claimPatternSource.run(row.id, obsId);
+  stmts.syncPatternFrequency.run(row.id);
+}
+
 export function consolidate(
   db: Database.Database,
   stmts: Statements,
@@ -69,12 +103,12 @@ function extractToolSequences(stmts: Statements, obs: Observation[]): number {
   let created = 0;
   for (const [seq, entry] of sequences) {
     if (entry.count >= 2) {
-      stmts.upsertPattern.run(
+      recordPattern(
+        stmts,
         'tool_sequence',
         `Recurring workflow: ${seq}`,
         JSON.stringify({ sequence: seq.split(' → '), count: entry.count }),
-        entry.count,
-        JSON.stringify([...new Set(entry.ids)]),
+        entry.ids,
         Math.min(0.5 + entry.count * 0.1, 0.9),
       );
       created++;
@@ -100,7 +134,8 @@ function extractErrorFixChains(stmts: Statements, obs: Observation[]): number {
         const errorSig = extractErrorSignature(current.output_summary);
         const fixApproach = candidate.input_summary.slice(0, 200);
 
-        stmts.upsertPattern.run(
+        recordPattern(
+          stmts,
           'error_fix',
           `Error: ${errorSig} → Fix: ${fixApproach}`,
           JSON.stringify({
@@ -109,8 +144,7 @@ function extractErrorFixChains(stmts: Statements, obs: Observation[]): number {
             tool: current.tool_name,
             steps: j - i,
           }),
-          1,
-          JSON.stringify([current.id, candidate.id]),
+          [current.id, candidate.id],
           0.6,
         );
         created++;
@@ -140,12 +174,12 @@ function extractConceptClusters(stmts: Statements, obs: Observation[]): number {
   let created = 0;
   for (const [file, ids] of fileToObs) {
     if (ids.length >= 3) {
-      stmts.upsertPattern.run(
+      recordPattern(
+        stmts,
         'concept_cluster',
         `Focused work on ${file}`,
         JSON.stringify({ file, observation_count: ids.length }),
-        ids.length,
-        JSON.stringify([...new Set(ids)]),
+        ids,
         Math.min(0.4 + ids.length * 0.05, 0.8),
       );
       created++;
