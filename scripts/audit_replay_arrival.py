@@ -21,6 +21,19 @@ Per shard this reports: same-second fraction, peak rows/sec (era evidence), min(
 duplicated population (replay start, IF the era test passes) — then the arrival ordering,
 and which shard the backfill's dirname-order default would award ownership to instead.
 
+LIMITS (found by cbp, 1a1379e; the anchored instrument is audit_arrival_anchor.py):
+
+  1. UNANCHORED. Same-second adjacency is a *pace* test, and pace is not era: a population
+     generated at machine pace that carries EVENT time (e.g. 3,000 rows stamped ~1,000/s of
+     transcript) tests WRITE-TIME here while being event time — this script prints
+     "era-verified" over a fabricated ordering. The discriminator is real but cannot
+     validate itself; only a clock outside the column can (cross-shard ts identity, statx
+     btime). On this corpus both anchors CONFIRM the pace reading — but the confirmation is
+     the anchor's, not this script's.
+  2. TIES REVERT TO THE DEFAULT. arrivals.sort() breaks tied first-ts on the shard name,
+     so on a tie the "arrival order" below silently becomes the dirname order this script
+     exists to replace. Ties are now flagged rather than ranked.
+
 Read-only. Usage: python3 scripts/audit_replay_arrival.py
 """
 import os, glob, sqlite3, datetime
@@ -76,9 +89,15 @@ def main():
 
     if len(arrivals) >= 2:
         arrivals.sort()
-        print("\narrival order over the duplicated population (era-verified, not assumed):")
+        tied = {t for t, _ in arrivals if sum(1 for u, _ in arrivals if u == t) > 1}
+        print("\narrival order over the duplicated population "
+              "(era-tested by pace — unanchored; audit_arrival_anchor.py is the anchored test):")
         for t, s in arrivals:
             print(f"  {t}  {s}")
+        if tied:
+            print(f"  !! tied first-ts at {sorted(tied)}: sort() breaks ties on the shard NAME,")
+            print("     so the ranking at those rows is the dirname default, not arrival.")
+            print("     Do not read an order off a tie.")
         default_winner = sorted(s for _, s in arrivals)[0]
         arrival_first = arrivals[0][1]
         print(f"\ndirname-order backfill default awards ownership to: {default_winner}")

@@ -295,8 +295,10 @@ export function openRootClaims(shardDbPath: string): RootClaims | null {
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 2000'); // hooks on two shards can claim in the same second
   db.exec(ROOT_CLAIMS_SCHEMA);
-  // Migration: claim_conflict.event_session_id. seen.db went live at c48af34 (2026-07-31 08:30Z)
-  // and CREATE TABLE IF NOT EXISTS will not widen the table it already made. Nullable ADD COLUMN
+  // Migration: claim_conflict.event_session_id. seen.db went live at c48af34 — go-live measured
+  // by statx btime as 2026-07-31 08:44:41Z (audit_arrival_anchor.py §3); the 08:30Z first quoted
+  // here was the first claim's first_ts, which is the EVENT's clock (COALESCE(event ts, now)),
+  // not the guard's. CREATE TABLE IF NOT EXISTS will not widen the table it already made. Nullable ADD COLUMN
   // — a NOT NULL ALTER is rejected outright, and NULL is the value this column WANTS for rows
   // whose event session was never knowable. (ADD COLUMN is supported on WITHOUT ROWID tables.)
   try {
