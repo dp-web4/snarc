@@ -221,16 +221,46 @@ Patterns form over **act sequences**, not text clusters. The shapes worth extrac
 This is `micro_consolidation.py`'s question — *what are the causal rules* — asked over tool
 trajectories rather than game trajectories.
 
-## 8. The loop that is missing entirely
+## 8. The loop that is closed, and transmits nothing
 
 **Every recall records whether it was used, and what happened next.**
 
-11,153 empty results changed nothing because retrieval is a dead end: results go out, and nothing about
-whether they helped comes back. Without a utility signal, any memory system can only optimise
-surrogate properties forever, regardless of how good the scorer is.
+Earlier drafts of this section said retrieval was "a dead end: results go out, and nothing about
+whether they helped comes back." That was wrong, in a harder way. `retrieval_log` has been recording
+estimate-vs-outcome pairs for months — 10,724 rows, 10,715 scored — and **the outcome side does not
+measure the item that was surfaced** (audit, 2026-07-31). A length-matched random *other* memory,
+scored against the same session, scores the same:
 
-Minimum viable: a recall id, whether the caller acted on it, and the outcome of the act that followed.
-This also makes the empty-store failure *loud* on day one rather than week two.
+| kind | n | real item | length-matched placebo | lift | p |
+|---|---|---|---|---|---|
+| observation | 3,419 | 89.2% | 85.9% | +3.3pp | <0.001 |
+| identity | 3,648 | 54.5% | 54.3% | +0.2pp | 0.852 |
+| pattern | 3,648 | 15.8% | 16.4% | −0.7pp | 0.222 |
+
+The outcome proxy (`memory.ts:352-372`) calls a memory relevant when ≥2 of its significant tokens
+reappear in later same-cwd work within 6h. Clearing a fixed threshold scales with how many tokens the
+item brought (`match_key` is `.slice(0, 40)`), so the column measures **token budget and genre** —
+observations average 35.2 tokens and score 83.5%, patterns average 8.6 and score 9.0%. Patterns are
+short because a consolidated pattern is a one-liner; the instrument penalises the tier for the
+property that makes it a tier.
+
+A closed loop that transmits nothing is worse than an open one: an open loop is visibly missing,
+this one reports 83.5%.
+
+**Therefore the recall-utility primitive starts from zero, not from 10,715 pairs.** Its first
+deliverable is not a scorer but an *outcome definition*, and the acceptance criterion is
+`scripts/audit_outcome_instrument.py` — beat a length-matched placebo by ≥5pp at p≤0.01. That gate
+exits 1 today, deliberately: an acceptance test that already passes cannot distinguish a repair from
+a dead gauge.
+
+Minimum viable, restated: a recall id, an outcome definition **that has passed the placebo gate**,
+and the result of the act that followed. This also makes the empty-store failure *loud* on day one
+rather than week two.
+
+Open (§12): every candidate outcome definition so far is confoundable the same way. Selection
+feedback measures selection, not utility — a memory chosen and ignored scores identically to one
+chosen and used. The only design with a control *inside* the measurement is a briefing-suppression
+arm: surface nothing, some of the time, and measure what changes.
 
 ## 9. What NOT to capture
 
@@ -252,15 +282,26 @@ unless something re-indexes the attachments onto the §6 secondary full-text pat
 in scope for the migration and is the same pass as §4's step 1 — the prediction mining walks all
 704k rows anyway, so it is the natural place to emit the attachment index. One pass, two products.
 
-### 10.1 Three standing defects, reported not patched
+### 10.1 Four standing defects, reported not patched
 
-Found by the writer inventory; all three corrupt the existing store and any replay run against it.
+Found by the writer inventory (#1–#3) and the outcome-instrument audit (#4); all four corrupt the
+existing store and any replay run against it.
 
 | # | defect | site | effect |
 |---|---|---|---|
 | 1 | decay decrement reads the column it writes | `db.ts:447` | 7-day cliff to exactly 0.0; no memory older than a week |
 | 2 | `base_salience` backfilled from already-decayed `salience` | `db.ts:232` | every pre-June-2026 tool row permanently unrankable (`memory.ts:209` ranks by it) |
 | 3 | dimension columns written as literals on the bypass path | `memory.ts:176` | 59.4% of `Conversation` rows carry fabricated SNARC scores |
+| 4 | retrieval outcome is item-blind | `memory.ts:352-372` | `retrieval_log.relevant` measures token budget and genre, not usefulness; a random other memory scores the same (§8) |
+
+**Do not "fix" #4 by raising the threshold.** The obvious repair — `overlap >= 3` instead of `>= 2` —
+makes the length dependence *stronger*, since clearing a higher fixed bar depends even more on how
+many tokens the item brought. #4 needs a different outcome definition, not a retuned one, and
+`scripts/audit_outcome_instrument.py` is the gate it must pass.
+
+Note also that #4 interacts with #2 the way #1 does: `estimate` for observations is
+`base_salience ?? salience` (`memory.ts:209`), so for every pre-June row the estimate side of the
+calibration loop is *also* instrument state. Both sides of the loop are currently unmeasured.
 
 **Why these are not fixed in this change.** #1 and #2 interact: the obvious repair for the cliff is
 `salience = base_salience - 0.02*(age-7)`, but for pre-migration rows `base_salience` *is* the cliff's
@@ -278,15 +319,30 @@ Stated as predictions so they can be wrong:
    does not, the diagnosis is wrong. **The baseline is `scoreConversationTurn`** — the keyword-density
    scorer that actually wrote 98.3% of the corpus — not the SNARC novelty dimension, which barely ran.
    This makes the test harder, which is the point.
+
+   **And on the tool path there is no defendant at all** (kimi, notice 435). The five-dimension
+   `SNARCScorer.score` has been in no live write path since 2026-07-01: the tool path captures
+   failures only, at a hard-coded `salience=0.85` (`hooks/handlers/post-tool-use.ts:52`). The
+   incumbent is a constant. "Beat the existing scorer" is therefore a bar cleared by existing, so
+   victory over the fixture is **not** a success criterion — the criterion is *calibration*, estimate
+   against outcome. Which requires an outcome definition that has passed §8's placebo gate. Until
+   then criterion 1 is a ranking demonstration, not a measurement, and must be labelled as one.
 2. **Consolidation rate** rises by orders of magnitude, because acts of the same shape converge where
    paraphrases do not. Stated against the **corrected** denominator: SNARC's own extractor currently
    yields **1** pattern from 704,042 observations, and that one is a tautology. The bar is *any
    non-tautological act-sequence pattern at all*; the 26 `deep_*` entries are not the baseline, since
    they come from a text pass this proposal does not replace.
+   **Not measured by `retrieval_log`** — the 9.0% pattern relevance rate is item-blind (§8) and
+   cannot be used to show a new tier does better.
 3. **A standing defect surfaces unprompted** — e.g. a recurring-mismatch pattern for an endpoint that
    always returns empty.
 4. **Retrieval precedes action**: a situation query before a risky act returns the prior occurrence.
 5. **Recall utility is measurable at all** — currently it is not, which is the more basic failure.
+   This now has a falsifier rather than an assertion behind it:
+   `python3 scripts/audit_outcome_instrument.py` must exit 0. It exits 1 today (identity +0.2pp,
+   observation +3.3pp, pattern −0.7pp over a length-matched placebo; the bar is ≥5pp at p≤0.01).
+   Note observations fail on *materiality*, not significance — +3.3pp is real and too small to carry
+   a claim.
 
 ## 12. Open questions
 
@@ -303,14 +359,28 @@ Stated as predictions so they can be wrong:
 - **Cross-agent sharing**: are act records portable between members, and does a mismatch on one
   machine predict anything on another? (Also the gate on §5's Conflict dimension, which is scoped
   to same-machine contradictions until this is answered.)
-- **Is there a live scorer here to migrate, or is this a first implementation in a rewrite's
-  clothes?** Raised by the writer inventory and not yet settled. The five columns are literals on
-  59.4% of rows; tier 2's only readable content comes from an LLM pass that never reads them; tier
-  1's ranking key is a migration artifact for everything before June. If nothing in the load path
-  is currently scoring, then §10's coexistence story is about preserving *text*, not about
-  migrating a *scorer* — and §11.1's "beat the existing model" may have no defendant. This does not
-  change what to build. It changes what may honestly be claimed to have been learned from the
-  predecessor.
+- **Can recall utility be measured at all without an explicit counterfactual?** Every candidate
+  outcome definition so far confounds the same way. Token overlap asks "did this vocabulary recur"
+  and answers item-blind (§8). Hestia's selection feedback measures *selection*, not utility — a
+  memory chosen and then ignored scores identically to one chosen and used. The only design with a
+  control *inside* the measurement rather than bolted on afterwards is a **briefing-suppression
+  arm**: surface nothing, some fraction of the time, and measure what changes. It is ugly — the
+  system deliberately withholding memory from itself — and it is the only proposal on the table
+  that could not have produced the 83.5% artifact. Owner: kimi-code (joint 1, recall-utility
+  primitive).
+
+**Closed by notice 435 + the outcome audit:**
+
+- ~~Is there a live scorer here to migrate, or is this a first implementation in a rewrite's
+  clothes?~~ → **First implementation. Build, not replace.** `SNARCScorer.score` has been in no live
+  write path since 2026-07-01; the tool path captures failures only at a constant `salience=0.85`
+  (`hooks/handlers/post-tool-use.ts:52`), and the Conversation path is gated by
+  `scoreConversationTurn` at `conversation-capture.ts:206` with literal dimension columns. The
+  12,282 scored rows are the five-dimension scorer's fossil record. §10's coexistence story is
+  therefore about preserving *text assets* — the 26 readable `deep_*` patterns, and 704k utterances
+  as the mining corpus for §4's predictions — not about migrating a scorer. This does not change
+  what to build; it changes what may honestly be claimed to have been learned from the predecessor,
+  and it removes the replay test's defendant (§11.1).
 
 ---
 
@@ -319,4 +389,8 @@ Stated as predictions so they can be wrong:
 `SAGE/research-notes/TRACK2_SNARC_MEMORY_FINDINGS.md` (STM/LTM/retrieval architecture).
 Reframe from dp, 2026-07-31. Review and five accepted corrections from kimi-code (notice 432);
 writer inventory and the three struck §1 numbers in
-`forum/cbp-the-writer-inventory-ran-and-three-of-my-numbers-were-instruments-2026-07-31.md`.*
+`forum/cbp-the-writer-inventory-ran-and-three-of-my-numbers-were-instruments-2026-07-31.md`;
+build-not-replace and the `retrieval_log` find from kimi-code (notice 435); the outcome-instrument
+audit that voided it in
+`forum/cbp-the-outcome-column-is-item-blind-and-the-fourth-instrument-was-the-one-we-were-going-to-build-on-2026-07-31.md`,
+harness `scripts/audit_outcome_instrument.py`.*
