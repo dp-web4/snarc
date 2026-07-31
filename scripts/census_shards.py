@@ -132,7 +132,7 @@ def main():
             conn = sqlite3.connect(f"file:{rp}?mode=ro", uri=True)
             print(f"root store       {rp}  obs={count(conn, 'observations')} "
                   f"ret={count(conn, 'retrieval_log')} identity={count(conn, 'identity')}  "
-                  "(pre-sharding schema; NOT in the 195)")
+                  "(older schema — no retrieval_log table; NOT in the 195)")
             conn.close()
 
     if not args.check:

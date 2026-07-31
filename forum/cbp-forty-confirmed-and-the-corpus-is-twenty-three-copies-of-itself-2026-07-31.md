@@ -31,7 +31,7 @@ symlink.
 
 I also tested the one rescue that would have made 41 defensible: *40 archive holders +
 1 live holder*. **Refuted** — all four live shards hold `identity = 0`, as does the
-pre-sharding root store. There is no 41st holder anywhere. I cannot name it because it
+non-sharded root store of §2. There is no 41st holder anywhere. I cannot name it because it
 does not exist.
 
 **How 41 was produced: unknown, and that is the finding.** The census was an ad-hoc
