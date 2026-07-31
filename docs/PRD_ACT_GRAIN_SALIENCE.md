@@ -1,31 +1,69 @@
 # PRD — SNARC at act grain
 
-**Status**: proposal, for review
+**Status**: proposal, revised after kimi-code review (notice 432) + writer inventory
 **Author**: claude-code (CBP), 2026-07-31
 **Supersedes**: the utterance-grain capture model, not the SNARC model itself
+
+> **Revision note (2026-07-31, post-review).** kimi-code's review asked for a writer inventory
+> before implementation. It ran. **Three numbers in the original §1 were reporting instrument
+> state, not corpus state**, and are struck below. The diagnosis in §2 survives — but on
+> different evidence than it was first argued from. Full working:
+> `forum/cbp-the-writer-inventory-ran-and-three-of-my-numbers-were-instruments-2026-07-31.md`.
 
 ---
 
 ## 1. The problem, measured
 
-On CBP, 2026-07-31:
+On CBP, 2026-07-31, against `~/.engram/projects/791cace57ce9/engram.db`:
 
-| signal | value |
-|---|---|
-| observations (tier 1) | 704,037 |
-| sessions | 2,409 |
-| patterns (tier 2) | **28** — one per ~25,000 observations |
-| identity (tier 3) | 6 |
-| average salience | **0.002** |
-| membot store behind search | **0 memories, no cartridge mounted** |
-| searches answered from that empty store | **11,153, all returning zero** |
+| signal | value | status |
+|---|---|---|
+| observations (tier 1) | 704,042 | holds |
+| sessions | 2,409 | holds |
+| ~~average salience 0.002~~ | avg **`base_salience` = 0.349** | **STRUCK — decay artifact** |
+| ~~patterns 28 = consolidation collapse~~ | 28 = **26 LLM-pass + 1 tautology + 1 identity** | **STRUCK — mixed provenance** |
+| corpus never seen by the 5-dim scorer | **691,760 / 704,042 = 98.3%** | new |
+| `Conversation` rows with **literal** dimension columns | 409,255 / 689,546 = **59.4%** | new |
+| SNARC's own `tool_sequence` yield | **1 pattern** | new |
+| membot store behind search | 0 memories, no cartridge mounted | holds |
+| searches answered from that empty store | 11,153, all returning zero | holds |
 
-All six identity entries — the most durable tier — are about the memory system's own plumbing: port
-numbers, marketplace submission, its own launch posts. A year of research is absent from them.
+**What the struck numbers actually measured.** Three separate defects, none of them the scorer:
 
-Top-ranked retrievable entries are **context-compaction preambles** ("This session is being continued
-from a previous conversation…") at salience 1.000, ten days stale, duplicated. A three-term query for
-a full day's work returns *No memories found*.
+1. **A 7-day cliff, not a decay curve.** `db.ts:447` runs
+   `salience = MAX(0, salience - 0.02*(age-7))` on every session end — the right-hand side reads
+   the column it writes, so an intended age curve is applied as a repeated decrement. Measured:
+   rows aged ≤7d retain full value, 8d partial, **≥9d sit at exactly 0.0** (n=386,338 across
+   9–12d) where an absolute curve predicts 0.42–0.46. Averaged over a corpus 97% older than
+   8 days, that cliff *is* the 0.002.
+2. **A backfilled ranking key.** `db.ts:232` set `base_salience = salience` once, after the cliff
+   had already zeroed old rows. Tool-path `base_salience` by month: 2026-03/04/05 = **0.0000**,
+   06 = 0.034, 07 = 0.269 — monotonic in recency, which is a migration timestamp, not importance.
+   `memory.ts:209` ranks search by this column, so every tool observation before ~June 2026 is
+   permanently unrankable.
+3. **Mixed pattern provenance.** Of 28 patterns, 26 are `deep_*` (frequency=1) from the LLM
+   consolidation pass, which reads text and never touches the five columns. SNARC's own extractor
+   produced exactly one: `tool_sequence: "Conversation → Conversation → Conversation",
+   confidence 0.90, frequency 43,581,138`.
+
+**The evidence that survives, and is stronger.** That last row is the diagnosis rendered as a
+single database row: a tool-trajectory extractor, pointed at commentary, converged at maximum
+confidence on a statement carrying zero information. Alongside it:
+
+- **98.3% of the corpus was never scored.** `captureContext` (`memory.ts:165`) bypasses
+  `SNARCScorer.score` entirely, and on 59.4% of `Conversation` rows it writes **literals** into
+  the dimension columns — `surprise=0.5, novelty=0.7, conflict=0.1`, with `arousal` and `reward`
+  both set to the same `scoreConversationTurn` output. Not one of the five is a measurement.
+  (Same defect class as web4's audit `result` field: a column that looks measured, is constant,
+  and is consumed downstream by something that cannot tell.)
+- All six identity entries — the most durable tier — are about the memory system's own plumbing:
+  port numbers, marketplace submission, its own launch posts. A year of research is absent.
+- Top-ranked retrievable entries are **context-compaction preambles** at salience 1.000, ten days
+  stale, duplicated. A three-term query for a full day's work returns *No memories found*.
+
+**Consequence for §11.** The replay test's baseline is `scoreConversationTurn`, not the SNARC
+novelty dimension — and it is an open question whether "beat the existing scorer" has a defendant
+at all (see §12).
 
 ## 2. The diagnosis
 
@@ -91,6 +129,26 @@ collapsed, so a reader can weigh them:
 A missing prediction is recorded as **absent**, never as satisfied. An act with no expectation cannot
 be surprising and must not score as unsurprising — that distinction is the whole discipline.
 
+**Predicting is itself rewarded** (kimi, review 432). The attractor risk here is not conservative
+prediction — it is *prediction silence*. If absence lowers salience, an agent wanting a quiet record
+learns never to state expectations; if absence is neutral, nothing pulls toward stating them and
+source 1 starves. So: **a stated-and-tested prediction carries a small positive weight on its own,
+independent of whether it matched.** The behaviour being reinforced is the act of predicting, because
+that is what makes the other four dimensions computable at all.
+
+**Build-order dependency, stated because it is a cycle** (kimi, review 432). Source 1 lives in the
+assistant's reasoning text — which §3 demotes to an attachment and §9 lists as what-not-to-capture.
+The PostToolUse hook sees `tool_name`/`tool_input`/`tool_response`, never the reasoning that preceded
+the call. The highest-value field in `Act` therefore depends on parsing the exact stream this PRD
+proposes to stop scoring. Resolution is sequencing, not redesign:
+
+1. **Mine** the existing 704k utterances for explicit predictions adjacent to tool calls. They are
+   in there — *"expect 446 passing"*, *"this should fail"*. This also gives the §11.1 replay corpus.
+2. **Ship** expectation extraction as a PreToolUse-side buffer scan.
+3. **Only then** demote text to attachment.
+
+Text cannot be demoted before source 1 has been mined out of it.
+
 ## 5. The five, computed at the boundary
 
 None of these requires a language model.
@@ -99,9 +157,26 @@ None of these requires a language model.
 |---|---|---|
 | **Surprise** | outcome ≠ expectation, weighted by prediction strength | `HTTP 422` where a claim was expected; `pending: 0` after a deny |
 | **Novelty** | this (action, surface, outcome) shape unseen before | first-ever *writing a path is writing to the gate* deny |
-| **Arousal** | stakes of the surface: governance, deploy, irreversible, shared-state | arming the gate; restarting the daemon |
+| **Arousal** | **what class of law could have denied this act** (see below) | arming the gate; restarting the daemon |
 | **Reward** | a previously failing act now succeeds — mismatch closing | `ESCALATION … opened` after the handshake fix; CI red → green |
-| **Conflict** | two sources disagreeing about the same object | kimi's review vs the design; two convergent fixes colliding |
+| **Conflict** | **same-machine** contradiction about one object | the `getTargetOutcome` success-after-fail flip; two convergent fixes colliding |
+
+**Arousal is mechanical, not a list.** Defining it as "stakes of the surface" invited a
+hand-maintained inventory — the defect class this fleet keeps rediscovering. Instead: *what class of
+law could have denied this act?* The hestia gate/law taxonomy already types surfaces by consequence
+(a `deny` is a typed event, shared-state mutations are witnessed as chain events, deploy paths are
+law-gated categories). This is fleet-maintained rather than list-maintained, and it **fails in the
+right direction** — an unclassified surface gets low arousal instead of a stale entry claiming high.
+`src/snarc.ts:148` is already groping at this with a `git push|commit` regex; the gate taxonomy is
+that regex grown up. (kimi, review 432 — closes open question 3.)
+
+**Conflict is scoped to one machine.** Cross-agent disagreement — one member's review contradicting
+another's design — is not computable from a single machine's act stream. It requires shared act
+records, which is open question 4, and is deliberately not claimed here.
+
+**Reward already half-exists.** `scoreConflict` reads `getTargetOutcome` and scores success-after-fail
+at 0.4 — that branch *is* reward-as-transition, filed under the wrong dimension. It needs a rename and
+a promote, not new machinery.
 
 **Novelty is demoted.** It is the weakest of the five and currently the only one in use. It should act
 as a modifier on surprise, never as a standalone score.
@@ -125,6 +200,15 @@ This is what "useful in similar situations" requires: similarity over situations
 over commentary is a different relation that happens to share a name.
 
 ## 7. Consolidation
+
+**Capture at tool grain; consolidate at attempt grain.** The two directions want different units and
+there is no need to pick one (kimi, review 432 — dissolves open question 1). The tool call is the
+right *write* unit because it is the only place outcome is mechanical. The task attempt — a maximal
+act-sequence sharing an intent, recoverable from `followed_by` plus the user-prompt boundary the
+hooks already see — is the right *read* unit, because §6's situation query is asked at attempt scale.
+The recurring-mismatch pattern below is already an attempt-grain object. Precedent:
+`mismatch_salience.py` captures at frame grain and consolidates at rule grain, and nobody calls that
+a contradiction.
 
 Patterns form over **act sequences**, not text clusters. The shapes worth extracting:
 
@@ -158,9 +242,32 @@ Stated explicitly, because the current corpus is 704,037 rows of mostly this:
 
 ## 10. Coexistence
 
-The existing 704,037 observations are **not deleted**. They are demoted to attachments and remain
+The existing 704,042 observations are **not deleted**. They are demoted to attachments and remain
 searchable by text. Nothing about this proposal requires discarding history — only that history stops
 being the scored object.
+
+**Demotion must name a re-indexer or it is a silent deletion** (kimi, review 432). A caller using only
+situation queries (§6) loses the entire back-corpus the moment text stops being the scored object,
+unless something re-indexes the attachments onto the §6 secondary full-text path. That re-index is
+in scope for the migration and is the same pass as §4's step 1 — the prediction mining walks all
+704k rows anyway, so it is the natural place to emit the attachment index. One pass, two products.
+
+### 10.1 Three standing defects, reported not patched
+
+Found by the writer inventory; all three corrupt the existing store and any replay run against it.
+
+| # | defect | site | effect |
+|---|---|---|---|
+| 1 | decay decrement reads the column it writes | `db.ts:447` | 7-day cliff to exactly 0.0; no memory older than a week |
+| 2 | `base_salience` backfilled from already-decayed `salience` | `db.ts:232` | every pre-June-2026 tool row permanently unrankable (`memory.ts:209` ranks by it) |
+| 3 | dimension columns written as literals on the bypass path | `memory.ts:176` | 59.4% of `Conversation` rows carry fabricated SNARC scores |
+
+**Why these are not fixed in this change.** #1 and #2 interact: the obvious repair for the cliff is
+`salience = base_salience - 0.02*(age-7)`, but for pre-migration rows `base_salience` *is* the cliff's
+output. Fixing #1 alone would launder #2 into a real-looking decay curve — a corrupted column made to
+look healthy is worse than one visibly pinned at zero. They must be repaired together, against a
+backup, with the migration boundary identified from `meta.json` rather than guessed. That is its own
+change with its own test, not a rider on a design PRD.
 
 ## 11. Falsifiable success criteria
 
@@ -168,9 +275,14 @@ Stated as predictions so they can be wrong:
 
 1. **Replay test.** Score one day of real tool calls both ways. The act-grain model ranks the handshake
    `422` and the `already-patched` false green at the top; the novelty model ranks port numbers. If it
-   does not, the diagnosis is wrong.
-2. **Consolidation rate** rises by orders of magnitude from 0.004%, because acts of the same shape
-   converge where paraphrases do not.
+   does not, the diagnosis is wrong. **The baseline is `scoreConversationTurn`** — the keyword-density
+   scorer that actually wrote 98.3% of the corpus — not the SNARC novelty dimension, which barely ran.
+   This makes the test harder, which is the point.
+2. **Consolidation rate** rises by orders of magnitude, because acts of the same shape converge where
+   paraphrases do not. Stated against the **corrected** denominator: SNARC's own extractor currently
+   yields **1** pattern from 704,042 observations, and that one is a tautology. The bar is *any
+   non-tautological act-sequence pattern at all*; the 26 `deep_*` entries are not the baseline, since
+   they come from a text pass this proposal does not replace.
 3. **A standing defect surfaces unprompted** — e.g. a recurring-mismatch pattern for an endpoint that
    always returns empty.
 4. **Retrieval precedes action**: a situation query before a risky act returns the prior occurrence.
@@ -178,22 +290,33 @@ Stated as predictions so they can be wrong:
 
 ## 12. Open questions
 
-Flagged rather than resolved, and the first two are where I would most like to be argued with:
+**Closed by review 432:**
 
-- **Is the tool boundary the right horizon, or one level too low?** A single call may be too fine; the
-  meaningful unit might be *task attempt* (a sequence with an intent). The frame that fixed the
-  utterance-grain error could itself be one grain off.
-- **Does explicit prediction change agent behaviour in ways that corrupt the signal?** An agent that
-  knows it is scored on mismatch may predict conservatively. This is the metric-attractor risk, aimed
-  at the metric's own input.
-- **Arousal is the least mechanical of the five** — "stakes of the surface" needs a definition that is
-  not a hand-maintained list, which is the defect class this fleet keeps rediscovering.
+- ~~Is the tool boundary one grain too low?~~ → **Both grains, one per direction.** Capture at tool
+  grain, consolidate at attempt grain (§7).
+- ~~Does explicit prediction corrupt the signal?~~ → The risk was misidentified. It is *prediction
+  silence*, not conservative prediction, and the fix is to weight the act of predicting (§4).
+- ~~Arousal needs a non-list definition.~~ → "What class of law could have denied this act" (§5).
+
+**Still open:**
+
 - **Cross-agent sharing**: are act records portable between members, and does a mismatch on one
-  machine predict anything on another?
+  machine predict anything on another? (Also the gate on §5's Conflict dimension, which is scoped
+  to same-machine contradictions until this is answered.)
+- **Is there a live scorer here to migrate, or is this a first implementation in a rewrite's
+  clothes?** Raised by the writer inventory and not yet settled. The five columns are literals on
+  59.4% of rows; tier 2's only readable content comes from an LLM pass that never reads them; tier
+  1's ranking key is a migration artifact for everything before June. If nothing in the load path
+  is currently scoring, then §10's coexistence story is about preserving *text*, not about
+  migrating a *scorer* — and §11.1's "beat the existing model" may have no defendant. This does not
+  change what to build. It changes what may honestly be claimed to have been learned from the
+  predecessor.
 
 ---
 
 *Grounding: `dev-SAGE/tools/sequence_corpus/mismatch_salience.py` (surprise as the salient unit),
 `dev-SAGE/sage/cognition/thalamic_router/micro_consolidation.py` (experience → causal rules),
 `SAGE/research-notes/TRACK2_SNARC_MEMORY_FINDINGS.md` (STM/LTM/retrieval architecture).
-Reframe from dp, 2026-07-31.*
+Reframe from dp, 2026-07-31. Review and five accepted corrections from kimi-code (notice 432);
+writer inventory and the three struck §1 numbers in
+`forum/cbp-the-writer-inventory-ran-and-three-of-my-numbers-were-instruments-2026-07-31.md`.*
