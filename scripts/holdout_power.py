@@ -37,6 +37,16 @@ ASSUMPTIONS, stated because they are the whole answer:
       conservative; kimi's use of it is correct and is kept.
   (c) Sessions are independent. Nonstationarity is not modelled (and makes
       long horizons worse, not better).
+
+ITEM CLUSTERING (kimi, notice re:445). The design effect below covers
+intra-SESSION correlation (rho). There is a second axis: the same item is
+surfaced across many briefings, so item-arm trials also cluster BY ITEM, and
+a per-instance Bernoulli(eps) holdout weights its estimand by surfacing
+frequency -- it prices the effect of the most-surfaced items, not the typical
+one. rho_item is unmeasurable before outcome capture, but the cluster COUNTS
+are measurable today, from retrieval_log (match_key as item-identity proxy:
+space-joined content tokens, truncated at 40 -- collisions would if anything
+understate distinctness). Printed below under item_concentration().
 """
 import argparse
 import math
@@ -75,6 +85,23 @@ def measure(db):
         'days': [d[1] for d in days],
         'day_labels': [d[0] for d in days],
     }
+
+
+def item_concentration(db):
+    """
+    How many distinct items ever surface, and how concentrated is surfacing?
+    match_key is the item-identity proxy (see header). Returns per-kind
+    appearance counts plus the head share, so the reader can see what a
+    per-instance holdout's estimand is actually weighted by.
+    """
+    c = sqlite3.connect('file:' + db + '?mode=ro', uri=True)
+    rows = list(c.execute('SELECT item_kind, COUNT(DISTINCT surfaced_ts) '
+                          'FROM retrieval_log GROUP BY match_key, item_kind'))
+    c.close()
+    per_kind = {}
+    for kind, n in rows:
+        per_kind.setdefault(kind, []).append(n)
+    return per_kind
 
 
 def capture_audit(db):
@@ -202,6 +229,31 @@ def main():
           f'should report.')
     print()
 
+    print()
+
+    # Second clustering axis: the same item recurs ACROSS briefings. rho_item
+    # needs outcome capture, but the cluster counts do not -- measure them.
+    conc = item_concentration(db)
+    all_apps = sorted((n for ns in conc.values() for n in ns), reverse=True)
+    total_app = sum(all_apps)
+    print('ITEM CLUSTERING (measured; match_key as item proxy) -- the item arm')
+    print('clusters by item across sessions, not only by session:')
+    print(f'  {"kind":<14}{"distinct":>9}{"surf>1x":>9}{"max":>7}{"top10 share":>12}')
+    for kind, ns in sorted(conc.items()):
+        ns = sorted(ns, reverse=True)
+        print(f'  {kind:<14}{len(ns):>9}{sum(1 for n in ns if n > 1):>9}'
+              f'{max(ns):>7}{sum(ns[:10]) / sum(ns):>11.1%}')
+    print(f'  {"ALL":<14}{len(all_apps):>9}'
+          f'{sum(1 for n in all_apps if n > 1):>9}{max(all_apps):>7}'
+          f'{sum(all_apps[:10]) / total_app:>11.1%}')
+    print('  A per-instance Bernoulli(eps) holdout draws ~eps*count withheld')
+    print('  trials per item: the head items dominate the estimate and the')
+    print('  singleton tail contributes none. The estimand is head-weighted,')
+    print('  and per-item inference is bounded by the DISTINCT count above --')
+    print('  an item-level experiment on a 3-item tier is a 3-cluster study.')
+    print('  rho_item itself is unmeasured until outcome capture ships.')
+    print()
+
     # Can either of the two driving inputs be measured today? Probe the corpus.
     cap = capture_audit(db)
     print('CAN THIS BE SIZED TODAY? the two inputs, measured vs assumed')
@@ -209,7 +261,15 @@ def main():
     print(f'  rate = {per_day:.1f}/day      MEASURED (retrieval_log, this store)')
     print(f'  p  = {args.p}              ASSUMED -- P(mismatch recurs). Needs '
           f'outcome capture.')
-    print(f'  rho = unmeasured        ASSUMED 0 above -- needs outcome capture.')
+    print(f'  rho = unmeasured        ASSUMED 0 above -- needs outcome capture '
+          f'(both axes: within-session, within-item).')
+    print(f'  r   = unmeasured        ASSUMED 1 implicitly -- P(the item\'s '
+          f'situation recurs in-window). Item-attributable trials resolve')
+    print(f'                        only when the situation recurs; censoring is '
+          f'treatment-independent so it inflates n by ~1/r without biasing.')
+    print(f'  item clusters           MEASURED (above): {len(all_apps)} distinct '
+          f'items, top-10 carry {100*sum(all_apps[:10])/total_app:.0f}% of '
+          f'surfacings.')
     print(f'  outcome capture: of {cap["tool_rows"]:,} non-Conversation tool rows, '
           f'{cap["with_output"]:,} ({100*cap["with_output"]/cap["tool_rows"]:.1f}%) '
           f'carry any output_summary.')
