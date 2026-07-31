@@ -152,9 +152,12 @@ def find_stores():
 
 
 def default_db():
-    """The store with the most retrieval_log rows; live root wins ties (it is listed first,
-    and max() on a stable list keeps the first maximum). Never pick by file size -- the
-    archive is 100x larger and would win forever."""
+    """The LIVE store with the most retrieval_log rows. Row count has the same asymptote the
+    docstring below once warned about for file size: the archive (10.7k rows) beats every live
+    store, so a naive run's headline verdict described the pre-rename corpus -- 'measurable
+    historically', not the claim under test ('measurable today'). Archives stay selectable
+    via --db / --all-stores. (kimi, notice-537 reply: the default was the archive-vs-live
+    trap the gauge exists to catch.)"""
     counts = []
     for p, label in find_stores():
         try:
@@ -164,10 +167,11 @@ def default_db():
         except sqlite3.Error:
             n = 0
         counts.append((p, label, n))
-    live = [c for c in counts if c[2] > 0]
-    if not live:
+    nonzero = [c for c in counts if c[2] > 0]
+    if not nonzero:
         return None, counts
-    return max(live, key=lambda c: c[2]), counts
+    live = [c for c in nonzero if c[1] == 'live']
+    return max(live or nonzero, key=lambda c: c[2]), counts
 
 
 def audit(db, label):
