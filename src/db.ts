@@ -77,12 +77,20 @@ CREATE TABLE IF NOT EXISTS observations (
   base_salience   REAL NOT NULL DEFAULT 0,
   cwd             TEXT,
   tags            TEXT,
-  content_hash    TEXT
+  content_hash    TEXT,
+  scored_by       TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_obs_session ON observations(session_id);
 CREATE INDEX IF NOT EXISTS idx_obs_salience ON observations(salience DESC);
 CREATE INDEX IF NOT EXISTS idx_obs_ts ON observations(ts);
+-- NOTE: the dedup guard's index (idx_obs_content_hash) is deliberately NOT here. This
+-- block runs against pre-migration databases too, where content_hash does not exist
+-- yet, and CREATE INDEX IF NOT EXISTS on a missing column throws "no such column",
+-- aborting the rest of the exec and taking capture down on every existing store. It is
+-- created in openDatabase() AFTER the ALTER instead. Caught by acceptance check 6 on
+-- 2026-07-31 — same failure mode as the base_salience index note below and as d938e7e
+-- (last_seen ALTER). Third time in this file: an index cannot precede its column.
 
 -- FTS5 for full-text search
 CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(
@@ -247,6 +255,22 @@ export function openDatabase(path?: string): Database.Database {
     db.exec(`ALTER TABLE observations ADD COLUMN content_hash TEXT`);
   } catch { /* already migrated */ }
 
+  // Migration: scored_by — which writer generation scored this row. The guard is keep-first
+  // (the existing row survives, the re-capture no-ops), so a row's SNARC vector is frozen at
+  // whichever generation happened to see the content first. Measured 2026-07-31: 3,050 of
+  // 17,808 distinct Conversation turns (17.1%) carry DIFFERENT (surprise, novelty) across
+  // their copies — the corpus was written by several scorer generations over 4.5 months and
+  // nothing records which. Without this column "keep-first" silently freezes the oldest,
+  // least-instrumented scoring and no re-score can find the rows that need it. Existing rows
+  // keep NULL, which is the honest value: their generation is genuinely unknown.
+  try {
+    db.exec(`ALTER TABLE observations ADD COLUMN scored_by TEXT`);
+  } catch { /* already migrated */ }
+
+  // Index AFTER the ALTER, for the same reason base_salience's index is here: on a
+  // pre-migration db the SCHEMA block runs before the column exists.
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_obs_content_hash ON observations(content_hash)`);
+
   // Migration: seen_set.last_seen — enables recency-windowed novelty (prune stale tokens so novelty
   // doesn't saturate to 0 as the set grows). Backfill from first_seen.
   try {
@@ -279,12 +303,33 @@ export function prepareStatements(db: Database.Database) {
     insertObservation: db.prepare(`
       INSERT INTO observations (session_id, tool_name, input_summary, output_summary,
         surprise, novelty, arousal, reward, conflict, salience, base_salience, cwd, tags,
-        content_hash)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        content_hash, scored_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
 
+    // STORE-scoped, not session-scoped. The session predicate was dropped 2026-07-31.
+    //
+    // 9a9fb50 scoped this to session with the reason "a global constraint would drop
+    // legitimately-repeated observations on the tool path". That reason does not describe
+    // any code path: capture() (the tool path) never calls this guard — it stores
+    // content_hash as metadata only, as that same commit message says one line down. The
+    // guard's ONLY caller is captureContext, where the content is a human turn or a
+    // decision and identical text is the same event by construction, not a legitimate
+    // repeat. So the scope protected a caller that does not exist, and cost real rows:
+    //
+    //   ~/.engram/projects/791cace57ce9, rows written since 2026-07-23 under real
+    //   (non-constant) session ids:  1,593 rows -> 1,135 distinct  = 28.8% re-stored
+    //   across sessions, with ZERO same-session guard failures. The leak is entirely
+    //   the session predicate.
+    //
+    // Counter-intuitively this makes the constant-session-id bug LOOK protective: rows
+    // written under the host id 888f190a since 07-23 are 288/288 distinct (1.00 copies)
+    // precisely because a constant session degenerates this guard to store-global. Fixing
+    // the id source WITHOUT this change would have raised duplication, not lowered it.
+    // That is why this lands first. See forum/cbp-the-duplication-was-fixed-nine-days-ago-
+    // and-the-remedy-is-inverted-2026-07-31.md.
     existsContentHash: db.prepare(`
-      SELECT 1 FROM observations WHERE session_id = ? AND content_hash = ? LIMIT 1
+      SELECT 1 FROM observations WHERE content_hash = ? LIMIT 1
     `),
 
     upsertPattern: db.prepare(`

@@ -13,6 +13,28 @@ import { createHash } from 'node:crypto';
 /** Stable content hash for dedup — backs the observations.content_hash column (Kimi #4). */
 const contentHash = (s: string): string => createHash('sha256').update(s).digest('hex');
 
+/**
+ * Which scorer generation wrote a row — stamped into observations.scored_by.
+ *
+ * Answers kimi's 2026-07-31 question ("when content is identical but scoring generations
+ * differ, which copy wins?"). The answer this file implements is KEEP-FIRST, because the
+ * guard no-ops the re-capture, and keep-first is the only option that preserves `ts` — the
+ * row's first-seen time is real provenance and a delete+reinsert would destroy it to save a
+ * re-derivable score.
+ *
+ * Keep-first has a real cost, which is what this constant is for: the surviving row's SNARC
+ * vector is frozen at whichever generation saw the content first. Without a version stamp
+ * that freeze is invisible AND unfixable — you cannot select the rows a new scorer should
+ * re-score. With it, re-scoring is a separate, auditable operation over
+ * `WHERE scored_by IS NULL OR scored_by != <current>`, decided by whoever ships the scorer
+ * rather than by whichever hook happened to fire first.
+ *
+ * BUMP THIS whenever a change to snarc.ts or captureContext's fixed vector would give the
+ * same input a different (surprise, novelty, arousal, reward, conflict). Do not bump it for
+ * changes that cannot alter a score.
+ */
+export const SCORER_VERSION = 'snarc-v2-2026-07-31';
+
 export interface CaptureResult {
   salience: number;
   stored: boolean; // true if promoted to Tier 1
@@ -149,6 +171,7 @@ export class SNARCMemory {
         cwd,
         JSON.stringify(tags),
         contentHash(toolName + '\x00' + inputSummary + '\x00' + outputSummary),
+        SCORER_VERSION,
       );
     }
 
@@ -165,13 +188,19 @@ export class SNARCMemory {
   captureContext(kind: string, text: string, cwd: string, salience = 0.8): boolean {
     const summary = summarize(text, 800);   // context carries meaning — keep more than tool telemetry (300)
     if (!summary.trim()) return false;
-    // Idempotent re-capture: if this exact context was already stored THIS session, no-op.
+    // Idempotent re-capture: if this exact context is already in the STORE, no-op.
     // Fixes duplicate observations under replayed SessionEnd (Kimi #4, 2026-07-21): the STORE is
     // the dedup authority, keyed on the stored form's hash, so it's robust to the caller's
-    // pre-summarize key differing from the stored value (the root cause). Scoped to session, not
-    // a global UNIQUE — that would drop legitimately-repeated observations on the tool path.
+    // pre-summarize key differing from the stored value (the root cause).
+    //
+    // 2026-07-31: the scope was session, and the session predicate was the whole remaining
+    // leak — 28.8% of rows written under real session ids were content the shard already
+    // held, with zero same-session guard failures. Identical text on THIS path is the same
+    // event by construction (a human turn, a decision, a failure); "the same prompt in a new
+    // session" is a re-reading of one event, not a second one. The tool path (capture())
+    // never consults this guard, so nothing legitimately-repeated is at risk. See db.ts.
     const hash = contentHash(kind + '\x00' + summary);
-    if (this.stmts.existsContentHash.get(this.sessionId, hash)) return false;
+    if (this.stmts.existsContentHash.get(hash)) return false;
     const tags = extractTags(kind, summary, '');
     const conflict = kind === 'failure' ? 0.9 : 0.1;   // failures are the surprise/conflict signal
     this.stmts.insertObservation.run(
@@ -179,7 +208,7 @@ export class SNARCMemory {
       0.5, 0.7, salience, salience, conflict,   // surprise, novelty, arousal, reward, conflict (nominal)
       salience, salience,                        // salience, base_salience — forced high (salient by construction)
       cwd, JSON.stringify(tags),
-      hash,
+      hash, SCORER_VERSION,
     );
     return true;
   }
