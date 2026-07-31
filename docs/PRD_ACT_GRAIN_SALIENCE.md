@@ -18,7 +18,7 @@
 > **one of 195 archive shards**: `~/.engram/projects/791cace57ce9/engram.db`, which is the
 > sha256 prefix of the directory `/mnt/c/exe/projects` (the workspace *parent*, one segment
 > above `ai-agents`), consolidating 17 real project cwds. Fleet totals across all 195 shards:
-> **921,478 observations, 19,953 retrieval rows, 386 identity rows across 41 shards.** Our
+> **921,478 observations, 19,953 retrieval rows, 386 identity rows across 40 shards.** Our
 > shard therefore holds 76.4% of fleet observations and 53.7% of fleet briefings — the bulk,
 > not a slice — **but only 6 of 386 identity rows**; one shard (synchronism-chemistry) holds
 > 84. Any statement below about *pool size* is shard-local. Statements about the *selector*
@@ -26,17 +26,34 @@
 >
 > Read stores through `file:...?mode=ro`. The archive carries a 193 MB `-wal`; a flat file
 > copy silently drops it and reports `retrieval_log` = 10,715 instead of 10,724.
+>
+> **COUNT CAVEAT (defect #11).** Every observation count here and below — 704,049, the fleet
+> 921,478, and every rate computed over them — counts **rows, not events**. 95.6% of tier 1 is
+> the same events re-inserted (22.6 copies each; Conversation turns 38.7 each, worst case 414).
+> The distinct-event corpus is **31,219**. `retrieval_log` is unaffected (written once per
+> surfacing), so the retrieval-tier findings in §§4–7 stand as measured; the observation-tier
+> *rates* need re-derivation on the distinct denominator before they are quoted again.
+> `python3 scripts/audit_tier1_duplication.py --check`.
+>
+> Every number in this block is re-derivable: `python3 scripts/census_shards.py --check`
+> reproduces all eight and exits 1 on drift. Predicates it states rather than implies —
+> population = `~/.engram/projects/*/engram.db` (the pre-sharding root store
+> `~/.engram/engram.db`, 8 rows from 2026-03-15, no `retrieval_log` table, is *not* one of
+> the 195); holder = `count(*) FROM identity > 0`. The holder count was published as 41 in
+> the 2026-07-31 revision; kimi-code's second seat put it at 40 and the script agrees —
+> **40**, corrected above. 41 was produced by an ad-hoc query that was never committed and
+> cannot be reconstructed, which is why the script now exists.
 
 On CBP, 2026-07-31, against `~/.engram/projects/791cace57ce9/engram.db`:
 
 | signal | value | status |
 |---|---|---|
-| observations (tier 1) | 704,042 | holds |
-| sessions | 2,409 | holds |
+| ~~observations (tier 1) 704,042~~ | 704,049 rows = **31,219 distinct events**; 95.6% duplicate | **STRUCK — re-ingestion (defect #11)** |
+| ~~sessions 2,409~~ | 2,413 in the `sessions` table, but **99.12% of observations carry ONE `session_id`** spanning 4.5 months | **STRUCK — not a session count** |
 | ~~average salience 0.002~~ | avg **`base_salience` = 0.349** | **STRUCK — decay artifact** |
 | ~~patterns 28 = consolidation collapse~~ | 28 = **26 LLM-pass + 1 tautology + 1 identity** | **STRUCK — mixed provenance** |
-| corpus never seen by the 5-dim scorer | **691,760 / 704,042 = 98.3%** | new |
-| `Conversation` rows with **literal** dimension columns | 409,255 / 689,546 = **59.4%** | new — second-seated at 58.4% (drift) |
+| corpus never seen by the 5-dim scorer | 691,760 / 704,042 = **98.3%** | **DENOMINATOR PENDING** — the rate is over duplicated rows; needs re-derivation over the 31,219 distinct events (defect #11) |
+| `Conversation` rows with **literal** dimension columns | 409,255 / 689,546 = **59.4%** | **DENOMINATOR PENDING** — same; 689,549 Conversation rows are 17,808 distinct turns |
 | distinct values in `conflict`, over 704,049 rows | **5** | new — data-only form of "never scored"; needs no code read |
 | SNARC's own `tool_sequence` yield | **1 pattern** | new — second-seated |
 | ~~pattern relevance 9.0% (`retrieval_log`)~~ | instrument measures token budget + genre; placebo scores the same | **STRUCK — item-blind (defect #4)** |
@@ -341,6 +358,17 @@ only relocated from the metric into the design. The cost is exactly a factor of 
 | the session (recurrence, efficiency) | briefing | 12,976 | **7.0 mo** |
 | the session, randomized per item | — | 116,786 | **5.3 yr — do not build** |
 
+**The session unit has no column, in either table (2026-07-31).** Both session-attached rows above
+assume the store can tell one session from another. It cannot. `retrieval_log` — the outcome table —
+has columns `id, surfaced_ts, cwd, source, item_kind, estimate, match_key, relevant`: **there is no
+`session_id` at all**, so a session-level outcome is not groupable, only `cwd`- or time-groupable.
+And on `observations`, `session_id` is 99.12% one value over 4.5 months (defect #11), so it does not
+carry the grain either. This is not a power problem; it is an identification problem, and it is
+strictly upstream of choosing ε. **Either the outcome table gains a real session key before the arm
+is built, or the arm's unit is `(cwd, day)` and the table above is recomputed for that unit.**
+Nothing here is blocked on it *conceptually* — but no session-unit number in this section can be
+computed from the store as it stands, and that should be said before anyone budgets 7.0 months.
+
 δ=5pp, ε=10%, p=0.5, α=0.01, power 0.8; `scripts/holdout_power.py`. Repair adoption therefore ships
 **first**: it is the only metric whose outcome is item-attributable, so it is the only one that pays
 for item-level randomization, and there the k penalty becomes a k discount.
@@ -424,12 +452,13 @@ Name the writer, not just the path.
 | 3 | dimension columns carry no per-item information | `memory.ts:176` | `conflict` has **5 distinct values across 704,049 rows**; `surprise` is two constants covering 100.0%; 92.8% of rows sit in three constant triples. Stated this way the defect needs no code read — see below |
 | 4 | retrieval outcome is item-blind | `memory.ts:352-372` | `retrieval_log.relevant` measures token budget and genre, not usefulness; a random other memory scores the same (§8) |
 | 5 | outcome half of the act grain is not captured | writer path | 58/12,310 (0.5%) of tool rows carry any `output_summary`, **all 58 on 2026-07-01**; the other 12,252 hold the literal string `""` (not NULL, not empty — a `trim()=''` test reads the channel as 100% healthy). Last tool event of any kind: **2026-07-24**. Inputs captured in full. Mismatch is outcome-vs-expectation, so no outcome metric in §8.1 is computable and the holdout cannot be sized (§8.2) |
-| 6 | the selector is a constant function on two of three tiers — **and the source table is write-frozen** | `memory.ts:293,304,317`; `deep-consolidation.ts:151-182` | **Two stacked failures.** (i) `slice(0,3)` is a **quota, not a ranking cut**: 91.0% of briefings are exactly (3,3,3) slots, and no tier can abstain. Identity surfaces the same 3 of its 6 rows in **1,217 of 1,217** briefings since 2026-07-04 — zero departures — and pattern is 3 distinct in 1,217/1,217 too. Pattern top-3 = 72.1% of surfacings with the tautology at #1 (n=1,212) against the two substantive operational patterns at 68 and 62. (ii) **all 6 identity rows carry `source='deep-dream-auto'`, which no code path at HEAD can emit** (HEAD emits only `deep-dream-immediate` / `reproduced-<N>x` / `human-confirmed`); newest identity write **2026-05-20**. The current writer is a re-occurrence gate promoting at `frequency >= 3`, and in four months over 704k observations and 28 deep-consolidation runs it has produced **1 proposal at frequency 1 and zero promotions**. "Fixed content for ten weeks" is the tier *not being written*, not the tier being stable — and the pool size of 6 is shard-local (fleet: 386 across 41 shards, max 84) |
+| 6 | the selector is a constant function on two of three tiers — **and the source table is write-frozen** | `memory.ts:293,304,317`; `deep-consolidation.ts:151-182` | **Two stacked failures.** (i) `slice(0,3)` is a **quota, not a ranking cut**: 91.0% of briefings are exactly (3,3,3) slots, and no tier can abstain. Identity surfaces the same 3 of its 6 rows in **1,217 of 1,217** briefings since 2026-07-04 — zero departures — and pattern is 3 distinct in 1,217/1,217 too. Pattern top-3 = 72.1% of surfacings with the tautology at #1 (n=1,212) against the two substantive operational patterns at 68 and 62. (ii) **all 6 identity rows carry `source='deep-dream-auto'`, which no code path at HEAD can emit** (HEAD emits only `deep-dream-immediate` / `reproduced-<N>x` / `human-confirmed`); newest identity write **2026-05-20**. The current writer is a re-occurrence gate promoting at `frequency >= 3`, and in four months over 704k observations and 28 deep-consolidation runs it has produced **1 proposal at frequency 1 and zero promotions**. "Fixed content for ten weeks" is the tier *not being written*, not the tier being stable — and the pool size of 6 is shard-local (fleet: 386 across 40 shards, max 84) |
 | 7 | the quota pads with repeats | `memory.ts:317` (observation tier) | the same item can occupy 2–3 of a tier's 3 slots: **522 padded slots, 4.9% of all surfacings**. Observation is 3 *slots* in 91.0% of briefings but 3 *distinct items* in **57.1%** (distinct-per-briefing 3→695, 2→334, 1→147, 0→41). Every "3 items" elsewhere in this document means 3 slots; k_effective is **8.383**, not 9, and per-instance holdout assignment is therefore a variable-dose treatment (§8.1) |
 
 | 8 | `meta.json` — the only hash → directory provenance the system records — has never been written | `db.ts:50-55` | `getDbPath` obtains `writeFileSync` via a bare `require('node:fs')` inside an ESM build (`"type": "module"` since the initial commit). `require` is undefined; every call has thrown `ReferenceError` into a `catch { /* non-critical */ }` since `1ab5ee9`, the commit that introduced sharding. Observed: **1 of 195** archive shards and **0 of 4** live shards carry a `meta.json`. Consequence: which directory a shard represents is unrecoverable without a full census — which is why §1's SCOPE block took eight rounds to write. **Fixed at this commit** (top-level import; verified against a scratch root) |
 | 9 | workspace consolidation is off — the rename moved the marker in the code and not on disk | `db.ts:30` (`8aacf1a`) | `resolveWorkspaceDir` walks up for `.snarc-root`. On disk the marker is `/mnt/c/exe/projects/.engram-root` (created 2026-07-08 20:46). Falls through to per-directory sharding. **Natural experiment:** the 194 non-consolidated archive shards wrote 32,086 observations on 07-08, 4,187 on 07-09, and **67 on 07-10** — a 480x collapse the day after the marker appeared, with 791cace57ce9 taking over. Consolidation demonstrably worked; it is now silently off, and the live store reached 4 shards in its first 2 hours. **Not patched:** either fix re-routes every live write in the fleet mid-flight, which is an operator decision |
 | 10 | two workspace resolvers with disjoint rules, documented as one | `hooks/lib/project-root.ts:17`, `db.ts:25` | Hooks compose them: `getDbPath(resolveProjectRoot(cwd))`. The first walks up for `CLAUDE.md`/`AGENTS.md` then `.git`; the second walks up for `.snarc-root`. `db.ts:22` states they are "the single resolver shared by the hooks (writers) and the MCP server (reader), so they can no longer disagree on which DB is 'the project'." At HEAD they disagree by construction |
+| 11 | **the dedup guard is a no-op and 95.6% of tier 1 is re-ingested duplicates** | `db.ts:285` (`existsContentHash`), `conversation-capture.ts` via `pre-compact.ts:49` / `session-end.ts:36` | The only guard against re-storing a transcript turn is `SELECT 1 FROM observations WHERE session_id = ? AND content_hash = ?`. **`content_hash` is NULL on 702,058 / 704,049 rows (99.72%)** and `= NULL` is never true in SQL, so the guard cannot match; and **`session_id` is effectively a constant** — one value covers 697,888 rows (99.12%) from 2026-03-15 to 2026-07-31 — so it carries no discrimination either. Every PreCompact and SessionEnd therefore re-walks the transcript and re-inserts every turn still visible in it. Measured: 704,049 rows are **31,219 distinct `(tool_name, input_summary, output_summary)`** (22.6 copies each); Conversation is **689,549 rows / 17,808 distinct turns** (38.7 copies each); the worst single turn appears **414 times across 22 distinct days and 28 cwds**. Consequence at the top of the stack: `tool_transitions` holds **1,576,273** `Conversation→Conversation` edges from 689,549 Conversation rows (2.29x), and the `patterns` upsert accumulates that across runs into **frequency 43,581,138** for the tautology — **the #1 item in 1,212 of 1,217 briefings (defect #7) is authored by this bug**. `scripts/audit_tier1_duplication.py --check`. **Not patched** — the fix is a real dedup key and a real session id, and it changes what gets written |
 
 **#3's two halves have different evidentiary standing.** The *mechanism* — that `captureContext`
 bypassed the scorer, hence 98.3% never scored — rests on a code read and is single-seat. The
