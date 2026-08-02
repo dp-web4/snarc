@@ -93,7 +93,25 @@ function extractToolSequences(stmts: Statements, obs: Observation[]): number {
   const sequences = new Map<string, { count: number; ids: number[] }>();
 
   for (let i = 0; i <= obs.length - windowSize; i++) {
-    const seq = obs.slice(i, i + windowSize).map(o => o.tool_name).join(' → ');
+    const names = obs.slice(i, i + windowSize).map(o => o.tool_name);
+    // A "workflow" whose steps are all the same step is not a workflow.
+    //
+    // Measured 2026-08-02 on the live store: the single highest-confidence
+    // pattern in the entire memory was
+    //     Conversation → Conversation → Conversation   (frequency 12,679, conf 0.90)
+    // against 12,690 total observations — 99.9% of everything ever recorded,
+    // collapsed into a tautology and then surfaced at the top of every session
+    // start as an "inferred pattern".
+    //
+    // It is not wrong, which is what makes it useless: it is a restatement of the
+    // fact that most observations share a tool_name. A sequence miner earns its
+    // keep by finding TRANSITIONS, so a window with no transition carries no
+    // information and is dropped rather than counted. This also stops the
+    // degenerate case from dominating the frequency ranking and burying the real
+    // sequences (`user_prompt → Conversation → …`) that sit three orders of
+    // magnitude below it.
+    if (new Set(names).size < 2) continue;
+    const seq = names.join(' → ');
     const entry = sequences.get(seq) || { count: 0, ids: [] };
     entry.count++;
     entry.ids.push(...obs.slice(i, i + windowSize).map(o => o.id));
@@ -209,7 +227,51 @@ function extractErrorSignature(output: string): string {
   return match ? match[0].slice(0, 100) : output.slice(0, 80);
 }
 
+/**
+ * File extensions we will accept as evidence that a dotted token is a FILE.
+ *
+ * Measured 2026-08-02 against a real 12,690-observation store: the previous
+ * matcher was `/[\w./\-]+\.\w{1,8}/g` — "anything containing a dot" — and the
+ * resulting concept_cluster patterns were almost entirely debris:
+ *
+ *   0.00 (57)  0.8b (56)  1.0 (54)  0.5 (46)  i.e (29)  e.g (25)
+ *   //github.com (83)  0.12 (23)  2.3 (19)  json.load  player.y  env.step
+ *
+ * Real signal — handler.rs, derivation.rs, arbiter.rs, MEMORY.md — sat at
+ * frequency 3–11, i.e. BELOW `0.05`. The top "concept" in the entire memory was
+ * the decimal point.
+ *
+ * This is not a ranking problem that more data fixes. Decimals, version strings,
+ * abbreviations, URLs and method calls all outnumber filenames in prose about
+ * code, so the extractor was structurally guaranteed to bury its own signal. An
+ * allowlist is the right shape here: a wrong extension costs one missed cluster,
+ * while a permissive matcher costs the entire layer.
+ */
+const FILE_EXT =
+  /\.(ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|rb|c|h|cc|cpp|hpp|sh|bash|zsh|md|mdx|json|jsonl|toml|yaml|yml|html|css|scss|sql|txt|cfg|ini|conf|env|lock|npz|npy|ipynb|svg|png|jpg|gif|pdf|csv|parquet|service|timer|socket|proto|rst|tf|gradle|xml|plist|log|db|enc|key|pem|bak|so|dylib|dll|wasm|gz|zip|tar|patch|diff)$/i;
+
+/**
+ * Pull FILE references out of an observation summary.
+ *
+ * Three rejections, each for a class actually observed in the live store:
+ *   1. numeric-ish tokens  — `0.00`, `1.5`, `0.8b`, `v0.1.2`, `94.85`
+ *   2. short abbreviations — `i.e`, `e.g`
+ *   3. anything whose suffix is not a known file extension — which drops
+ *      `//github.com`, `crates.io`, `json.load`, `player.y`, `env.step`
+ */
 function extractFiles(input: string): string[] {
-  const matches = input.match(/[\w./\-]+\.\w{1,8}/g);
-  return matches ? [...new Set(matches)] : [];
+  const raw = input.match(/[\w./\-]+\.\w{1,8}/g) || [];
+  const out = new Set<string>();
+  for (const m of raw) {
+    const tok = m.replace(/[.\-]+$/, '');
+    // A decimal, a percentage, a version, a size — never a file. Checked first
+    // because `0.8b` and `v0.1.2` would otherwise reach the extension test and
+    // be judged on a suffix that is really a number.
+    if (/^v?[\d.]+[a-z]{0,3}$/i.test(tok)) continue;
+    // `i.e`, `e.g` — a stem and suffix both too short to be a real filename.
+    if (/^\w{1,2}\.\w{1,2}$/.test(tok)) continue;
+    if (!FILE_EXT.test(tok)) continue;
+    out.add(tok);
+  }
+  return [...out];
 }
