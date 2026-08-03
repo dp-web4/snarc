@@ -1,0 +1,31 @@
+TREE OPENED: /home/dp/.engram/projects
+shard dbs found: 195
+shards with a retrieval log: 69
+
+== headline ==
+briefing rows: 19953   briefings: 2896
+span: 2026-07-01 07:26:39 -> 2026-07-31 04:18:00
+scored: 18879 (94.6%)
+  identity   : rows  5885 (29.5% of briefing rows); scored 5510; relevant  53.4%
+  observation: rows  7898 (39.6% of briefing rows); scored 7451; relevant  89.4%
+  pattern    : rows  6170 (30.9% of briefing rows); scored 5918; relevant  26.2%
+  k distribution: {1: 7, 2: 8, 3: 709, 4: 45, 5: 46, 6: 330, 7: 128, 8: 126, 9: 1495, 24: 1, 30: 1}
+  identity rows across ALL shards: 386 across 40 shards
+
+== truncation seam (cap = 2000 chars), per-briefing ==
+  reconstructed lengths: p50=1169 p90=1665 p99=1982 max=2171
+  briefings over cap: 16 of 2896 (0.6%), in 2 shards
+  logged rows in over-cap briefings: 144 (logged; tail unshown once the cut lands mid-briefing)
+
+== spread (scored rows only) ==
+  briefings with >=2 scored rows: 2731; differential recurrence: 1703 (62.4%)
+  within-block identity   : blocks 1825, k={2: 14, 3: 1811, 1: 49}, differential 987 (54.1%)
+  within-block observation: blocks 2497, k={3: 2376, 2: 119, 1: 58, 15: 1, 12: 1}, differential 326 (13.1%)
+  within-block pattern    : blocks 1955, k={3: 1909, 1: 76, 2: 44, 15: 1, 12: 1}, differential 614 (31.4%)
+
+== never-shown placebo vs surfaced ==
+  surfaced rows scored: 11959; rows with no eligible control: 6920
+  identity   : surfaced  53.0% (n=5463) | never-shown[newest]  39.6% (prem +13.4) | never-shown[oldest]  64.0% (prem -10.9) | never-shown[random]  59.2% (prem  -6.2) |
+  observation: surfaced  89.9% (n=4721) | never-shown[newest]  94.3% (prem  -4.3) | never-shown[oldest]  93.5% (prem  -3.6) | never-shown[random]  89.9% (prem  +0.1) |
+  pattern    : surfaced  57.8% (n=1775) | never-shown[newest]  54.9% (prem  +2.9) | never-shown[oldest]  47.8% (prem +10.0) | never-shown[random]  63.0% (prem  -5.2) |
+  TOTAL      : surfaced  68.3% (n=11959) | never-shown[newest]  63.5% (prem  +4.8) | never-shown[oldest]  73.2% (prem  -4.9) | never-shown[random]  71.9% (prem  -3.6) |

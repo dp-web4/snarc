@@ -313,13 +313,15 @@ def main():
                 kind = r[4]
                 if r[7] is None:
                     continue
-                arm_a[kind][0] += r[7]
-                arm_a[kind][1] += 1
                 pool = elig.get(kind, [])
                 if not pool:
                     for s in arm_b:
                         n_missing[s] += 1
                     continue
+                # paired restriction: arm A counts only rows that HAVE a
+                # control, so the premium compares identical denominators
+                arm_a[kind][0] += r[7]
+                arm_a[kind][1] += 1
                 picks = {'newest': pool[-1], 'oldest': pool[0],
                          'random': rng.choice(pool)}
                 for s, mk in picks.items():
