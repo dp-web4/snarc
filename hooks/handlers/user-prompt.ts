@@ -39,8 +39,20 @@ async function main() {
     memory.close();
 
     if (related) {
-      // Inject via additionalContext — Claude sees this as part of the conversation
-      process.stdout.write(JSON.stringify({ additionalContext: related }));
+      // Inject via hookSpecificOutput.additionalContext. It MUST be nested and it MUST
+      // carry hookEventName: a TOP-LEVEL `additionalContext` is dropped as an
+      // unrecognized key, and the engine's own hint for that mistake ("Did you mean
+      // hookSpecificOutput.additionalContext (with a hookEventName)?") is not on stderr,
+      // not in the transcript, and so reaches nobody in a -p / hook-fired session.
+      // This hook emitted the top-level form from 2026-03-14 to 2026-08-06 and every
+      // reactive recall in that window was dark. Launch-verified on claude 2.1.221:
+      // nested arrives, top-level does not (hestia forum/cbp-snarc-reactive-recall-dark).
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'UserPromptSubmit',
+          additionalContext: related,
+        },
+      }));
     }
   } catch (e) {
     process.stderr.write(`[snarc] user-prompt capture skipped: ${(e as any)?.message ?? e}\n`);

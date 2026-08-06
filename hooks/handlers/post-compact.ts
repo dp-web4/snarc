@@ -44,8 +44,19 @@ async function main() {
       if (parts.length > 0) contextLines.push(`[snarc mid-session dream: ${parts.join(', ')}]`);
       contextLines.push(briefing);
 
+      // Same defect and same fix as user-prompt.ts: a TOP-LEVEL `additionalContext` is
+      // dropped as an unrecognized key, so this re-injection was dark from 2026-03-14 to
+      // 2026-08-06 — on the one event where being dark costs the most, since a compaction
+      // is exactly when the context this restores has just been lost.
+      // CAVEAT, stated because it is not the same evidence as its sibling: the nested form
+      // is launch-verified on UserPromptSubmit, NOT on PostCompact. Triggering a real
+      // compaction was out of reach for this probe, so this cell is UNTESTED, not
+      // confirmed. If a launch ever verifies it, say so here.
       const output = JSON.stringify({
-        additionalContext: `<snarc-context>\n${contextLines.join('\n')}\n</snarc-context>`,
+        hookSpecificOutput: {
+          hookEventName: 'PostCompact',
+          additionalContext: `<snarc-context>\n${contextLines.join('\n')}\n</snarc-context>`,
+        },
       });
       process.stdout.write(output);
     }
