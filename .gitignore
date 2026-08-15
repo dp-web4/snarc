@@ -5,3 +5,6 @@ dist/
 .snarc/
 .gitnexus
 .claude/skills/gitnexus/
+
+__pycache__/
+*.pyc
