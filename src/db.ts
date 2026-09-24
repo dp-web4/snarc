@@ -739,6 +739,22 @@ export function prepareStatements(db: Database.Database) {
       SELECT * FROM observations WHERE session_id = ? ORDER BY ts
     `),
 
+    // The BOUNDED form, for readers that want only the tail. rehydrateBuffer() used
+    // getSessionObservations and then .slice(-50) in JS, so every hook process pulled the
+    // WHOLE session out of SQLite to keep 50 rows. Measured on Sprout 2026-09-23: one long
+    // session held 216,371 of the DB's 229,140 observations (~131 MB of text), and the
+    // UserPromptSubmit hook took 5.4-11.4 s against its 5 s timeout — every prompt lost its
+    // reactive recall, silently, and the cost grew with session length.
+    //
+    // ORDER BY id, not ts: id is AUTOINCREMENT, so for an append-only log it is the same
+    // order, and idx_obs_session is (session_id, rowid) — the index walks backwards and the
+    // planner needs no sort. `ts DESC` on the same rows builds a temp B-tree over all
+    // 216k (0.274 s); `id DESC` is 0.000 s. Callers wanting the full set (consolidate at
+    // endSession, getContext) keep the unbounded statement above.
+    getRecentSessionObservations: db.prepare(`
+      SELECT * FROM observations WHERE session_id = ? ORDER BY id DESC LIMIT ?
+    `),
+
     getRecentObservations: db.prepare(`
       SELECT * FROM observations ORDER BY ts DESC LIMIT ?
     `),

@@ -137,8 +137,12 @@ export class SNARCMemory {
    */
   private rehydrateBuffer(sessionId: string): void {
     try {
-      const recent = this.stmts.getSessionObservations.all(sessionId) as any[];
-      for (const r of recent.slice(-50)) {
+      // BOUNDED IN SQL, not in JS. The tail is all this wants; asking for the whole session
+      // and slicing made every hook process pay for the session's entire history (see
+      // getRecentSessionObservations). Rows come back newest-first; reverse to the
+      // oldest-first order the buffer expects.
+      const recent = (this.stmts.getRecentSessionObservations.all(sessionId, 50) as any[]).reverse();
+      for (const r of recent) {
         this.buffer.push({
           toolName: r.tool_name,
           inputSummary: r.input_summary || '',
