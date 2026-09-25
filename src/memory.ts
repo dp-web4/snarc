@@ -327,10 +327,24 @@ export class SNARCMemory {
       }
     } catch { /* FTS query syntax error — skip */ }
 
-    // Sort: patterns first (higher value), then by salience
+    // Sort: patterns and identity ABOVE raw observations, then by strength.
+    //
+    // The intent above ("patterns first") was right and the comparator did the opposite:
+    // `a.tier - b.tier` ascending puts Tier 1 first, and because Tier 1 holds 1,861 rows
+    // against Tier 2's 86, observations always filled `limit` and the slice below then
+    // discarded every pattern. Measured 2026-09-25: `search('prior art')` returned 5 results,
+    // 0 of them patterns, while the prepared statement for Tier 2 returned the "check for
+    // prior art: look for open PRs" pattern on the same query. The tier was fetched, ranked
+    // last, and thrown away — every time, for every query, while the tool advertised
+    // "search across all tiers".
+    const rank = (t: number) => (t === 2 ? 0 : t === 3 ? 1 : 2);
     results.sort((a, b) => {
-      if (a.tier !== b.tier) return a.tier - b.tier; // lower tier = higher value
-      return (b.salience || 0) - (a.salience || 0);
+      const ra = rank(a.tier), rb = rank(b.tier);
+      if (ra !== rb) return ra - rb;
+      // Patterns carry `confidence`, observations carry `salience`; compare like with like.
+      const sa = a.salience ?? a.confidence ?? 0;
+      const sb = b.salience ?? b.confidence ?? 0;
+      return sb - sa;
     });
 
     return results.slice(0, limit);
