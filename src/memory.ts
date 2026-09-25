@@ -387,19 +387,66 @@ export class SNARCMemory {
 
     // Tier 2 patterns — INFERRED, only high-confidence (>= 0.6)
     // Exclude proposed_identity — those need human review before injection
+    //
+    // RANKED BY WHAT A PATTERN TEACHES, NOT BY HOW OFTEN ITS SHAPE RECURRED. getAllPatterns
+    // orders by `frequency DESC`, and the most frequent shapes are the conversational
+    // scaffolding: "Conversation → user_prompt → Conversation" at frequency 434. Every
+    // consolidated engineering lesson has frequency 1. So before this, the three briefing
+    // slots were structurally guaranteed to hold tautologies — measured on this database
+    // 2026-09-25, all three were Conversation/user_prompt cycles — while 80 deep_* patterns
+    // ("check for prior art: look for open PRs that touch it", "take a letter's date from
+    // the file's mtime") were never once surfaced. The seat then re-derived several of them
+    // at cost in a single day. Frequency is a measure of repetition, not of information.
+    const briefingRank = (p: any): number => {
+      const byKind: Record<string, number> = {
+        deep_insight: 0, deep_error_fix: 0, deep_decision: 1, deep_workflow: 1,
+        concept_cluster: 3, tool_sequence: 4,
+      };
+      return byKind[p.kind] ?? 2;
+    };
+    // A tool_sequence made only of conversational turns encodes nothing: it says that talking
+    // is followed by talking. Drop it rather than rank it, so it cannot crowd a slot.
+    const isEmptySequence = (p: any): boolean => {
+      if (p.kind !== 'tool_sequence') return false;
+      const steps = String(p.summary || '').replace(/^.*workflow:\s*/i, '').split('→');
+      return steps.every((s: string) => /^(conversation|user_prompt)$/i.test(s.trim()));
+    };
     const patterns = this.getPatterns()
-      .filter((p: any) => p.confidence >= 0.6 && p.kind !== 'proposed_identity');
+      .filter((p: any) => p.confidence >= 0.6 && p.kind !== 'proposed_identity')
+      .filter((p: any) => !isEmptySequence(p))
+      .sort((a: any, b: any) => briefingRank(a) - briefingRank(b) || b.confidence - a.confidence);
     if (patterns.length > 0) {
       lines.push('Inferred patterns (heuristic — may not be accurate):');
-      for (const p of patterns.slice(0, 3)) {
+      for (const p of patterns.slice(0, 5)) {
         lines.push(`  - [${p.kind}] ${p.summary} (confidence: ${p.confidence.toFixed(2)})`);
         this.logRetrieval(cwd, 'briefing', 'pattern', p.confidence, `${p.summary} ${p.detail || ''}`);
       }
     }
 
     // Tier 1 observations — OBSERVED, above median salience (>= 0.35)
-    const recent = this.stmts.getRecentObservations.all(20) as any[];
-    const highSalience = recent.filter((o: any) => o.salience >= 0.35);
+    // DEDUPED, because the loudest observations are the ones the harness repeats. A hestia
+    // mesh wake injects a near-identical prompt every time and it records at salience 1.000,
+    // so without this the three observation slots hold three copies of the same wake text —
+    // measured 2026-09-25. Keep the first of each near-duplicate and let the next distinct
+    // thing have the slot.
+    const recent = this.stmts.getRecentObservations.all(40) as any[];
+    const seen = new Set<string>();
+    const highSalience = recent
+      .filter((o: any) => o.salience >= 0.35)
+      .filter((o: any) => {
+        // Normalise before comparing: the SAME wake text is recorded once as a user_prompt
+        // and again as a Conversation carrying a "[Human] " role tag, so a raw prefix key
+        // sees two distinct strings and keeps both.
+        const key = String(o.input_summary || '')
+          .replace(/^\s*\[[^\]]{1,20}\]\s*/, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 60)
+          .toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
     if (highSalience.length > 0) {
       lines.push('Recent observations (directly recorded):');
       for (const o of highSalience.slice(0, 3)) {
