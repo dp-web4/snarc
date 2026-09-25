@@ -17,6 +17,29 @@ import { createHash } from 'node:crypto';
 const contentHash = (s: string): string => createHash('sha256').update(s).digest('hex');
 
 /**
+ * A hash of an observation's SHAPE — its text with the volatile parts masked.
+ *
+ * content_hash is exact, and exactness is useless against boilerplate that carries an id:
+ * measured 2026-09-25, the hestia wake prompt appears 684 times in one store with 684
+ * DISTINCT content hashes, because each carries a fresh notice id and timestamp. The scorer
+ * saw novelty 0.7 on every one of them and filed all 684 at base_salience 0.9 — 37% of the
+ * whole store, one prompt, all of it ranked as if newly informative.
+ *
+ * Masking ids, hashes, timestamps and bare numbers gives repeated boilerplate a stable
+ * identity, so the discount below can see that it is the same thing again.
+ */
+const shapeHash = (toolName: string, input: string): string => {
+  const norm = (input || '')
+    .replace(/\b[0-9a-f]{8,}\b/gi, '#')                 // ids, shas, uuids
+    .replace(/\d{4}-\d{2}-\d{2}[T ][\d:.]+Z?/g, '#')     // timestamps
+    .replace(/\b\d+\b/g, '#')                           // bare numbers
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 400);
+  return contentHash(toolName + '\x00' + norm);
+};
+
+/**
  * Which scorer generation wrote a row — stamped into observations.scored_by.
  *
  * Answers kimi's 2026-07-31 question ("when content is identical but scoring generations
@@ -179,6 +202,18 @@ export class SNARCMemory {
     const stored = scores.salience >= this.scorer.threshold;
     if (stored) {
       const tags = extractTags(toolName, inputSummary, outputSummary);
+      // REPETITION DISCOUNT. The Nth identical-shaped observation carries less information
+      // than the first; base_salience is what retrieval ranks by, so that is what falls.
+      // log2 rather than 1/n: the 2nd copy still matters, the 700th does not, and nothing
+      // is ever discounted to zero because the event did happen.
+      const shape = shapeHash(toolName, inputSummary);
+      let priorShapes = 0;
+      try {
+        priorShapes = (this.stmts.countShape.get(shape) as any)?.n ?? 0;
+      } catch { /* pre-migration database — no discount, same as before */ }
+      const discounted = priorShapes > 0
+        ? Math.max(0.05, scores.salience / (1 + Math.log2(1 + priorShapes)))
+        : scores.salience;
       this.stmts.insertObservation.run(
         this.sessionId,
         toolName,
@@ -190,11 +225,12 @@ export class SNARCMemory {
         scores.reward,
         scores.conflict,
         scores.salience,
-        scores.salience, // base_salience — immutable importance; `salience` (prev col) decays, this doesn't
+        discounted, // base_salience — importance. Discounted by how often this SHAPE recurred.
         cwd,
         JSON.stringify(tags),
         contentHash(toolName + '\x00' + inputSummary + '\x00' + outputSummary),
         SCORER_VERSION,
+        shape,
       );
     }
 
