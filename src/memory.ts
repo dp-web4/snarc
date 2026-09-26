@@ -17,6 +17,29 @@ import { createHash } from 'node:crypto';
 const contentHash = (s: string): string => createHash('sha256').update(s).digest('hex');
 
 /**
+ * A hash of an observation's SHAPE — its text with the volatile parts masked.
+ *
+ * content_hash is exact, and exactness is useless against boilerplate that carries an id:
+ * measured 2026-09-25, the hestia wake prompt appears 684 times in one store with 684
+ * DISTINCT content hashes, because each carries a fresh notice id and timestamp. The scorer
+ * saw novelty 0.7 on every one of them and filed all 684 at base_salience 0.9 — 37% of the
+ * whole store, one prompt, all of it ranked as if newly informative.
+ *
+ * Masking ids, hashes, timestamps and bare numbers gives repeated boilerplate a stable
+ * identity, so the discount below can see that it is the same thing again.
+ */
+const shapeHash = (toolName: string, input: string): string => {
+  const norm = (input || '')
+    .replace(/\b[0-9a-f]{8,}\b/gi, '#')                 // ids, shas, uuids
+    .replace(/\d{4}-\d{2}-\d{2}[T ][\d:.]+Z?/g, '#')     // timestamps
+    .replace(/\b\d+\b/g, '#')                           // bare numbers
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 400);
+  return contentHash(toolName + '\x00' + norm);
+};
+
+/**
  * Which scorer generation wrote a row — stamped into observations.scored_by.
  *
  * Answers kimi's 2026-07-31 question ("when content is identical but scoring generations
@@ -183,6 +206,18 @@ export class SNARCMemory {
     const stored = scores.salience >= this.scorer.threshold;
     if (stored) {
       const tags = extractTags(toolName, inputSummary, outputSummary);
+      // REPETITION DISCOUNT. The Nth identical-shaped observation carries less information
+      // than the first; base_salience is what retrieval ranks by, so that is what falls.
+      // log2 rather than 1/n: the 2nd copy still matters, the 700th does not, and nothing
+      // is ever discounted to zero because the event did happen.
+      const shape = shapeHash(toolName, inputSummary);
+      let priorShapes = 0;
+      try {
+        priorShapes = (this.stmts.countShape.get(shape) as any)?.n ?? 0;
+      } catch { /* pre-migration database — no discount, same as before */ }
+      const discounted = priorShapes > 0
+        ? Math.max(0.05, scores.salience / (1 + Math.log2(1 + priorShapes)))
+        : scores.salience;
       this.stmts.insertObservation.run(
         this.sessionId,
         toolName,
@@ -194,11 +229,12 @@ export class SNARCMemory {
         scores.reward,
         scores.conflict,
         scores.salience,
-        scores.salience, // base_salience — immutable importance; `salience` (prev col) decays, this doesn't
+        discounted, // base_salience — importance. Discounted by how often this SHAPE recurred.
         cwd,
         JSON.stringify(tags),
         contentHash(toolName + '\x00' + inputSummary + '\x00' + outputSummary),
         SCORER_VERSION,
+        shape,
       );
     }
 
@@ -331,10 +367,24 @@ export class SNARCMemory {
       }
     } catch { /* FTS query syntax error — skip */ }
 
-    // Sort: patterns first (higher value), then by salience
+    // Sort: patterns and identity ABOVE raw observations, then by strength.
+    //
+    // The intent above ("patterns first") was right and the comparator did the opposite:
+    // `a.tier - b.tier` ascending puts Tier 1 first, and because Tier 1 holds 1,861 rows
+    // against Tier 2's 86, observations always filled `limit` and the slice below then
+    // discarded every pattern. Measured 2026-09-25: `search('prior art')` returned 5 results,
+    // 0 of them patterns, while the prepared statement for Tier 2 returned the "check for
+    // prior art: look for open PRs" pattern on the same query. The tier was fetched, ranked
+    // last, and thrown away — every time, for every query, while the tool advertised
+    // "search across all tiers".
+    const rank = (t: number) => (t === 2 ? 0 : t === 3 ? 1 : 2);
     results.sort((a, b) => {
-      if (a.tier !== b.tier) return a.tier - b.tier; // lower tier = higher value
-      return (b.salience || 0) - (a.salience || 0);
+      const ra = rank(a.tier), rb = rank(b.tier);
+      if (ra !== rb) return ra - rb;
+      // Patterns carry `confidence`, observations carry `salience`; compare like with like.
+      const sa = a.salience ?? a.confidence ?? 0;
+      const sb = b.salience ?? b.confidence ?? 0;
+      return sb - sa;
     });
 
     return results.slice(0, limit);
@@ -391,19 +441,66 @@ export class SNARCMemory {
 
     // Tier 2 patterns — INFERRED, only high-confidence (>= 0.6)
     // Exclude proposed_identity — those need human review before injection
+    //
+    // RANKED BY WHAT A PATTERN TEACHES, NOT BY HOW OFTEN ITS SHAPE RECURRED. getAllPatterns
+    // orders by `frequency DESC`, and the most frequent shapes are the conversational
+    // scaffolding: "Conversation → user_prompt → Conversation" at frequency 434. Every
+    // consolidated engineering lesson has frequency 1. So before this, the three briefing
+    // slots were structurally guaranteed to hold tautologies — measured on this database
+    // 2026-09-25, all three were Conversation/user_prompt cycles — while 80 deep_* patterns
+    // ("check for prior art: look for open PRs that touch it", "take a letter's date from
+    // the file's mtime") were never once surfaced. The seat then re-derived several of them
+    // at cost in a single day. Frequency is a measure of repetition, not of information.
+    const briefingRank = (p: any): number => {
+      const byKind: Record<string, number> = {
+        deep_insight: 0, deep_error_fix: 0, deep_decision: 1, deep_workflow: 1,
+        concept_cluster: 3, tool_sequence: 4,
+      };
+      return byKind[p.kind] ?? 2;
+    };
+    // A tool_sequence made only of conversational turns encodes nothing: it says that talking
+    // is followed by talking. Drop it rather than rank it, so it cannot crowd a slot.
+    const isEmptySequence = (p: any): boolean => {
+      if (p.kind !== 'tool_sequence') return false;
+      const steps = String(p.summary || '').replace(/^.*workflow:\s*/i, '').split('→');
+      return steps.every((s: string) => /^(conversation|user_prompt)$/i.test(s.trim()));
+    };
     const patterns = this.getPatterns()
-      .filter((p: any) => p.confidence >= 0.6 && p.kind !== 'proposed_identity');
+      .filter((p: any) => p.confidence >= 0.6 && p.kind !== 'proposed_identity')
+      .filter((p: any) => !isEmptySequence(p))
+      .sort((a: any, b: any) => briefingRank(a) - briefingRank(b) || b.confidence - a.confidence);
     if (patterns.length > 0) {
       lines.push('Inferred patterns (heuristic — may not be accurate):');
-      for (const p of patterns.slice(0, 3)) {
+      for (const p of patterns.slice(0, 5)) {
         lines.push(`  - [${p.kind}] ${p.summary} (confidence: ${p.confidence.toFixed(2)})`);
         this.logRetrieval(cwd, 'briefing', 'pattern', p.confidence, `${p.summary} ${p.detail || ''}`);
       }
     }
 
     // Tier 1 observations — OBSERVED, above median salience (>= 0.35)
-    const recent = this.stmts.getRecentObservations.all(20) as any[];
-    const highSalience = recent.filter((o: any) => o.salience >= 0.35);
+    // DEDUPED, because the loudest observations are the ones the harness repeats. A hestia
+    // mesh wake injects a near-identical prompt every time and it records at salience 1.000,
+    // so without this the three observation slots hold three copies of the same wake text —
+    // measured 2026-09-25. Keep the first of each near-duplicate and let the next distinct
+    // thing have the slot.
+    const recent = this.stmts.getRecentObservations.all(40) as any[];
+    const seen = new Set<string>();
+    const highSalience = recent
+      .filter((o: any) => o.salience >= 0.35)
+      .filter((o: any) => {
+        // Normalise before comparing: the SAME wake text is recorded once as a user_prompt
+        // and again as a Conversation carrying a "[Human] " role tag, so a raw prefix key
+        // sees two distinct strings and keeps both.
+        const key = String(o.input_summary || '')
+          .replace(/^\s*\[[^\]]{1,20}\]\s*/, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 60)
+          .toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
     if (highSalience.length > 0) {
       lines.push('Recent observations (directly recorded):');
       for (const o of highSalience.slice(0, 3)) {

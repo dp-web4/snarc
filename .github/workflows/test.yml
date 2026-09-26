@@ -1,0 +1,20 @@
+name: test
+
+# The first check surface this repo has had (#5 review, 2026-09-25). Ranking and migration
+# are where a memory store fails silently -- nothing throws, the store just stops surfacing
+# what it holds -- so they are pinned in tests/ and run on every PR.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test

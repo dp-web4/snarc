@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS observations (
   cwd             TEXT,
   tags            TEXT,
   content_hash    TEXT,
+  shape_hash      TEXT,
   scored_by       TEXT,
   event_session_id TEXT
 );
@@ -477,6 +478,18 @@ export function openDatabase(path?: string): Database.Database {
     db.exec(`UPDATE patterns SET last_seen = COALESCE(updated_at, created_at, datetime('now')) WHERE last_seen IS NULL`);
   } catch { /* column already exists */ }
 
+  // observations.shape_hash — the repetition discount's key (see memory.ts `shapeHash`).
+  // The warning above is not historical: adding the column to SCHEMA alone does nothing for
+  // an existing database, because CREATE TABLE IF NOT EXISTS will not widen a table it
+  // already made, and insertObservation names the column — so prepareStatements throws
+  // `no such column: shape_hash` on every existing db and capture dies silently, exactly as
+  // it did for four days in 2026-06/07. Nullable ADD COLUMN, no backfill: rows written before
+  // the discount existed keep the salience they were given, and NULL is the honest value for
+  // "this row's shape was never computed".
+  try {
+    db.exec(`ALTER TABLE observations ADD COLUMN shape_hash TEXT`);
+  } catch { /* column already exists */ }
+
   // Migration: base_salience — immutable IMPORTANCE, decoupled from the decaying `salience`.
   // decayObservations drives `salience` toward 0 for old rows, but search ranks by salience, so
   // important old memories became unfindable. Search now ranks by base_salience (importance);
@@ -533,6 +546,9 @@ export function openDatabase(path?: string): Database.Database {
   // Index AFTER the ALTER, for the same reason base_salience's index is here: on a
   // pre-migration db the SCHEMA block runs before the column exists.
   db.exec(`CREATE INDEX IF NOT EXISTS idx_obs_content_hash ON observations(content_hash)`);
+  // Same rule, fourth time in this file: an index cannot precede its column. idx_obs_shape
+  // is created here, after the shape_hash ALTER above, never in SCHEMA.
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_obs_shape ON observations(shape_hash)`);
 
   // Migration: seen_set.last_seen — enables recency-windowed novelty (prune stale tokens so novelty
   // doesn't saturate to 0 as the set grows). Backfill from first_seen.
@@ -566,8 +582,14 @@ export function prepareStatements(db: Database.Database) {
     insertObservation: db.prepare(`
       INSERT INTO observations (session_id, tool_name, input_summary, output_summary,
         surprise, novelty, arousal, reward, conflict, salience, base_salience, cwd, tags,
-        content_hash, scored_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        content_hash, scored_by, shape_hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `),
+
+    // How many observations already share this SHAPE. Drives the repetition discount:
+    // the 684th copy of a wake prompt is not 684 times as important as the first.
+    countShape: db.prepare(`
+      SELECT COUNT(*) AS n FROM observations WHERE shape_hash = ?
     `),
 
     // Same insert WITH the event's own timestamp. Kept as a second statement rather
