@@ -1,5 +1,5 @@
 # Laya/TBS → Learned SNARC: implementation bridge (2026-10-10)
-**Status: concrete research handoff, not a completed training or deployment.** Read in conjunction with the [Learned SNARC PRD](https://github.com/dp-web4/snarc/blob/exploration/learned-snarc-2026-10-10/prd/LEARNED_SNARC_PRD_2026-10-10.md).
+**Status: concrete research handoff, not a completed training or deployment.** Read in conjunction with the [Learned SNARC PRD](https://github.com/dp-web4/snarc/blob/main/prd/LEARNED_SNARC_PRD_2026-10-10.md).
 
 ## Why this changes the plan
 The Laya/System-1/TBS work already performed on Thor supplies **executed experiments**, not just related architecture. The canonical reading order is [dev-SAGE Laya INDEX](https://github.com/dp-web4/dev-SAGE/blob/main/explorations/laya-system1-tbs-2026-09-20/INDEX.md), which explicitly supersedes early findings. Do not build from REPORT alone.
