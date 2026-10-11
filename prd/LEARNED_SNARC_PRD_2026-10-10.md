@@ -89,3 +89,8 @@ M0 inventory+data audit; M1 versioned schemas+replay+deterministic baselines; M2
 - https://github.com/dp-web4/SAGE/blob/main/forum/claude/SAGE/SNARC_SPECIFICATION.md
 - https://github.com/dp-web4/snarc/blob/main/docs/SNARC_SAGE_CROSSFEED_AUDIT_naive-opus-2026-06-27.md
 - https://github.com/dp-web4/dev-SAGE
+
+## 16. Laya/TBS evidence-backed execution dependency (2026-10-10 addendum)
+The Laya research was already executed in dev-SAGE. Treat its [chronological index](https://github.com/dp-web4/dev-SAGE/blob/main/explorations/laya-system1-tbs-2026-09-20/INDEX.md) as canonical over earlier superseded assessment claims. The model's real Thor runtime, calibration, failed cross-world role learning, outcome-label contamination, small-head controls, stopping-rule findings, and history-dependent turn selection are **baseline evidence and hard constraints**, not future work to rediscover. See the [cross-repo implementation bridge](../docs/LAYA_TBS_LEARNED_SNARC_BRIDGE_2026-10-10.md).
+
+SNARC's trained function is five-dimensional salience/attention estimation. Laya-style TBS is an optional fast cognitive policy/valuation layer *consuming* that estimate, not a replacement. Joint E0/E1/E2 experiments target waste recognition, stale belief/conflict detection, and cognitive move selection. First gate is a source/label census and executable baseline replay; then tiny-model training; then shadow model; only then separately reviewed active experiments. Require code, pinned data, reproducible metrics and negative cases before declaring completion.
